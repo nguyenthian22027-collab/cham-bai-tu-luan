@@ -8,13 +8,13 @@ import { getFirestore } from 'firebase/firestore';
  * Project settings > Your apps > SDK setup and configuration vào đây.
  */
 const firebaseConfig = {
-  apiKey: "AIzaSyAc6XIEI1aHWYSTtizvC1t6BiPeg0FcfME",
-  authDomain: "chamtuluanzalo.firebaseapp.com",
-  projectId: "chamtuluanzalo",
-  storageBucket: "chamtuluanzalo.firebasestorage.app",
-  messagingSenderId: "328872164660",
-  appId: "1:328872164660:web:dff78fabe101127cd4f961",
-  measurementId: "G-SDDR7Q8NLS"
+  apiKey: "AIzaSyD4WmF9ZfZ8peVY7WHJCLANGYqW2XxtEoU",
+  authDomain: "cham-bai-tu-luan-59d0e.firebaseapp.com",
+  projectId: "cham-bai-tu-luan-59d0e",
+  storageBucket: "cham-bai-tu-luan-59d0e.firebasestorage.app",
+  messagingSenderId: "533002337439",
+  appId: "1:533002337439:web:0a0800405924ac698776aa",
+  measurementId: "G-N2E4G0P2P7"
 } as const;
 
 const missingFirebaseKeys = Object.entries(firebaseConfig)
