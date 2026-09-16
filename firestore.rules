@@ -1,0 +1,231 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function hasProfile() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function approved() {
+      return hasProfile() && profile().isApproved == true;
+    }
+
+    function admin() {
+      return approved() && profile().role == 'ADMIN';
+    }
+
+    function staff() {
+      return approved() && profile().role in ['ADMIN', 'TEACHER', 'TA'];
+    }
+
+    function teacherOrAdmin() {
+      return approved() && profile().role in ['ADMIN', 'TEACHER'];
+    }
+
+    function student() {
+      return approved() && profile().role == 'STUDENT';
+    }
+
+    function myStudentId() {
+      return profile().studentId;
+    }
+
+    function ownsStudent(studentId) {
+      return student() && myStudentId() == studentId;
+    }
+
+    function authEmail() {
+      return signedIn() && request.auth.token.email != null
+        ? request.auth.token.email
+        : '';
+    }
+
+    function canClaimStudentProfile(studentId) {
+      return signedIn()
+        && studentId is string
+        && exists(/databases/$(database)/documents/students/$(studentId))
+        && (
+          !('status' in get(/databases/$(database)/documents/students/$(studentId)).data)
+          || get(/databases/$(database)/documents/students/$(studentId)).data.status == 'ACTIVE'
+        )
+        && get(/databases/$(database)/documents/students/$(studentId)).data.studentEmail == authEmail();
+    }
+
+    function ownSubmissionId(submissionId) {
+      return student() && submissionId.matches('^.+__' + myStudentId() + '$');
+    }
+
+    // ===================== TÀI KHOẢN =====================
+    match /users/{userId} {
+      allow get: if signedIn() && (request.auth.uid == userId || staff());
+      allow list: if staff();
+
+      // Người mới tự tạo hồ sơ giáo viên chờ duyệt. Học sinh chỉ được tự
+      // tạo hồ sơ khi Gmail trùng chính xác students/{studentId}.studentEmail.
+      allow create: if (
+          signedIn()
+          && request.auth.uid == userId
+          && request.resource.data.role == 'TEACHER'
+          && request.resource.data.isApproved == false
+        ) || (
+          signedIn()
+          && request.auth.uid == userId
+          && request.resource.data.role == 'STUDENT'
+          && request.resource.data.isApproved == true
+          && canClaimStudentProfile(request.resource.data.studentId)
+        ) || (
+          teacherOrAdmin()
+          && request.resource.data.role == 'STUDENT'
+        );
+
+      allow update: if admin()
+        || (teacherOrAdmin() && resource.data.role == 'STUDENT');
+      allow delete: if admin();
+    }
+
+    match /studentAccounts/{username} {
+      allow get: if staff() || (student() && resource.data.uid == request.auth.uid);
+      allow list: if staff();
+      allow create, update: if teacherOrAdmin();
+      allow delete: if admin();
+    }
+
+    // ===================== LỚP VÀ HỌC SINH =====================
+    match /classes/{classId} {
+      allow read: if approved();
+      allow create, update, delete: if teacherOrAdmin();
+    }
+
+    match /students/{studentId} {
+      // Cho phép một tài khoản Google đã đăng nhập tìm đúng hồ sơ có email
+      // trùng với token. Query phía client bắt buộc where studentEmail == email.
+      allow read: if staff()
+        || ownsStudent(studentId)
+        || (signedIn() && resource.data.studentEmail == authEmail());
+      allow create, update, delete: if teacherOrAdmin();
+    }
+
+    match /enrollments/{enrollmentId} {
+      allow read: if staff() || ownsStudent(resource.data.studentId);
+      allow create, update, delete: if teacherOrAdmin();
+    }
+
+    match /classTeachers/{id} {
+      allow read: if approved();
+      allow create, update, delete: if admin();
+    }
+
+    // ===================== ĐỀ VÀ BÀI ĐƯỢC GIAO =====================
+    match /assignmentExams/{examId} {
+      allow get, list: if staff();
+      allow create, update, delete: if teacherOrAdmin();
+
+      match /payloadChunks/{chunkId} {
+        allow get, list: if staff();
+        allow create, update, delete: if teacherOrAdmin();
+      }
+    }
+
+    match /assignments/{assignmentId} {
+      // Học sinh cần đọc metadata bài theo ID nhận từ assignmentTargets.
+      // Đề và đáp án vẫn được che phía API; assignmentExams chỉ staff đọc trực tiếp.
+      allow get, list: if approved();
+      allow create, update, delete: if teacherOrAdmin();
+    }
+
+    match /assignmentTargets/{targetId} {
+      allow get, list: if staff() || ownsStudent(resource.data.studentId);
+      allow create: if teacherOrAdmin();
+
+      allow update: if teacherOrAdmin()
+        || (
+          ownsStudent(resource.data.studentId)
+          && request.resource.data.studentId == resource.data.studentId
+          && request.resource.data.status in ['assigned', 'in_progress']
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'openedAt', 'startedAt'])
+        );
+
+      allow delete: if admin();
+    }
+
+    // ===================== BÀI LÀM =====================
+    match /submissions/{submissionId} {
+      // Cho phép học sinh kiểm tra document chưa tồn tại trước khi tạo nháp.
+      allow get: if staff()
+        || (
+          ownSubmissionId(submissionId)
+          && (
+            !exists(/databases/$(database)/documents/submissions/$(submissionId))
+            || (
+              resource.data.studentId == myStudentId()
+              && resource.data.status == 'in_progress'
+            )
+          )
+        );
+      allow list: if staff();
+
+      allow create: if ownsStudent(request.resource.data.studentId)
+        && ownSubmissionId(submissionId)
+        && request.resource.data.status == 'in_progress'
+        && request.resource.data.autoScore == 0
+        && request.resource.data.correctCount == 0
+        && request.resource.data.wrongCount == 0
+        && request.resource.data.keys().hasOnly([
+          'assignmentId', 'examId', 'classId', 'studentId', 'studentName',
+          'answers', 'status', 'autoScore', 'maxScore', 'correctCount',
+          'wrongCount', 'totalQuestions', 'startedAt', 'updatedAt'
+        ]);
+
+      allow update: if staff()
+        || ownsStudent(resource.data.studentId)
+          && ownSubmissionId(submissionId)
+          && resource.data.status == 'in_progress'
+          && request.resource.data.status == 'in_progress'
+          && request.resource.data.studentId == resource.data.studentId
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['answers', 'updatedAt']);
+
+      allow delete: if admin();
+    }
+
+    match /submissionResults/{submissionId} {
+      allow read, create, update, delete: if staff();
+    }
+
+    match /submissionGrades/{gradeId} {
+      allow read, create, update, delete: if staff();
+    }
+
+    // Chỉ API Firebase Admin được đọc/ghi dữ liệu link công khai và nhật ký Zalo.
+    match /publicEssayResults/{token} {
+      allow read, write: if false;
+    }
+
+    match /essayResultPublications/{submissionId} {
+      allow read, write: if false;
+    }
+
+    // Metadata ảnh chỉ được API Firebase Admin dùng để xác minh ownership/xóa file.
+    match /essayImages/{fileId} {
+      allow read, write: if false;
+    }
+
+    match /zaloSendLogs/{logId} {
+      allow read, write: if false;
+    }
+
+    // Mặc định từ chối mọi collection cũ (điểm danh, học phí, lương, bảng điểm...).
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

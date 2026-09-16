@@ -1,0 +1,587 @@
+/*
+  Mobile-first patch for StudentWorkRoom.
+  Place this file beside StudentWorkRoom.tsx.
+  All rules are scoped to the student work page where possible.
+*/
+
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+.student-work-page {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: clip;
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+.student-work-page button,
+.student-work-page label,
+.student-work-page input,
+.student-work-page textarea,
+.student-work-page math-field {
+  touch-action: manipulation;
+}
+
+.student-work-page img,
+.student-work-page svg,
+.student-work-page canvas,
+.student-work-page video {
+  max-width: 100%;
+}
+
+.student-work-page .examroom-topbar,
+.student-work-page .examroom-topbar-inner,
+.student-work-page .examroom-row-main,
+.student-work-page .exam-progress-row,
+.student-work-page .examroom-main,
+.student-work-page .exam-title-card,
+.student-work-page .exam-question-section,
+.student-work-page .exam-question-list,
+.student-work-page .exam-question-card,
+.student-work-page .exam-question-head,
+.student-work-page .exam-question-title,
+.student-work-page .exam-question-text,
+.student-work-page .exam-answer-area,
+.student-work-page .exam-option-text,
+.student-work-page .exam-tf-wrap,
+.student-work-page .exam-tf-table,
+.student-work-page .review-solution {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Keep the timer/progress visible while scrolling without consuming too much room. */
+.student-work-page .examroom-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 80;
+  width: 100%;
+  padding-top: env(safe-area-inset-top, 0);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.student-work-page .examroom-topbar-inner {
+  width: min(100%, 1080px);
+  margin-inline: auto;
+}
+
+/* The main content must never retain a desktop min-width. */
+.student-work-page .examroom-main {
+  width: min(100%, 980px);
+  margin-inline: auto;
+  padding-inline: clamp(10px, 3vw, 24px);
+}
+
+/* Long text, URLs and imported Word content may otherwise force horizontal overflow. */
+.student-work-page .exam-question-text,
+.student-work-page .exam-option-text,
+.student-work-page .review-solution,
+.student-work-page .exam-title-card h1,
+.student-work-page .exam-title-card p {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+/* MathJax / MathLive: keep formulas readable and allow local horizontal scrolling. */
+.student-work-page mjx-container[display="true"],
+.student-work-page .MathJax_Display,
+.student-work-page .katex-display,
+.student-work-page .math-display {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 4px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+.student-work-page mjx-container:not([display="true"]),
+.student-work-page .MathJax,
+.student-work-page .katex {
+  max-width: 100%;
+}
+
+.student-work-page math-field,
+.student-work-page .exam-mathfield-host,
+.student-work-page .exam-short-input {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  font-size: 16px; /* prevents automatic zoom on iPhone */
+}
+
+/* Images from Word/PDF scale to the phone instead of being cropped. */
+.student-work-page .exam-question-images {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  width: 100%;
+  margin-top: 12px;
+}
+
+.student-work-page .exam-question-images img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: min(60dvh, 560px);
+  margin-inline: auto;
+  object-fit: contain;
+  border-radius: 10px;
+}
+
+/* Stable desktop/tablet structure that can safely shrink. */
+.student-work-page .exam-question-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+}
+
+.student-work-page .exam-question-title {
+  overflow: hidden;
+}
+
+.student-work-page .exam-point-badge {
+  white-space: nowrap;
+}
+
+/* Multiple-choice options must allow the text column to shrink. */
+.student-work-page .exam-mc-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+}
+
+.student-work-page .exam-mc-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.student-work-page .exam-mc-letter {
+  flex: 0 0 auto;
+}
+
+.student-work-page .exam-mc-check {
+  max-width: 100%;
+  white-space: normal;
+  text-align: right;
+}
+
+/* True/False desktop grid remains compact but no longer forces a wide page. */
+.student-work-page .exam-tf-header,
+.student-work-page .exam-tf-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 74px 74px;
+  min-width: 0;
+}
+
+.student-work-page .exam-tf-statement {
+  min-width: 0;
+}
+
+.student-work-page .exam-tf-cell {
+  min-width: 0;
+  min-height: 48px;
+}
+
+/* Bottom actions remain reachable above browser bars and phone safe areas. */
+.student-work-page .exam-bottom-submit {
+  position: sticky;
+  bottom: 0;
+  z-index: 60;
+  display: grid;
+  grid-template-columns: 1fr 1.35fr;
+  gap: 10px;
+  width: 100%;
+  margin-top: 20px;
+  padding: 10px;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0));
+  border-radius: 14px 14px 0 0;
+  background: color-mix(in srgb, var(--surface, #ffffff) 94%, transparent);
+  box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.student-work-page .exam-bottom-submit .btn {
+  min-height: 48px;
+}
+
+/* Dialogs must fit inside the visual viewport. */
+.student-work-page .exam-confirm-overlay {
+  padding: 14px;
+  padding-top: calc(14px + env(safe-area-inset-top, 0));
+  padding-bottom: calc(14px + env(safe-area-inset-bottom, 0));
+}
+
+.student-work-page .exam-confirm-modal {
+  width: min(100%, 430px);
+  max-height: calc(100dvh - 28px);
+  overflow-y: auto;
+}
+
+/* Phone layout */
+@media (max-width: 700px) {
+  .student-work-page {
+    font-size: 15px;
+  }
+
+  .student-work-page .examroom-topbar-inner {
+    padding-inline: 10px;
+  }
+
+  .student-work-page .examroom-row-main {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+  }
+
+  .student-work-page .exam-back-btn {
+    min-width: 42px;
+    min-height: 42px;
+    padding-inline: 10px;
+  }
+
+  .student-work-page .exam-back-btn {
+    font-size: 0;
+  }
+
+  .student-work-page .exam-back-btn svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .student-work-page .exam-student-box {
+    min-width: 0;
+  }
+
+  .student-work-page .exam-student-box > div:last-child {
+    min-width: 0;
+  }
+
+  .student-work-page .exam-student-box strong,
+  .student-work-page .exam-student-box span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .student-work-page .exam-student-avatar {
+    display: none;
+  }
+
+  .student-work-page .exam-top-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .student-work-page .exam-violation-badge,
+  .student-work-page .exam-timer,
+  .student-work-page .exam-submit-top {
+    min-height: 40px;
+  }
+
+  .student-work-page .exam-violation-badge {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .student-work-page .exam-progress-row {
+    margin-top: 8px;
+  }
+
+  .student-work-page .examroom-main {
+    padding-inline: 8px;
+  }
+
+  .student-work-page .exam-title-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px;
+    padding: 14px;
+    border-radius: 14px;
+  }
+
+  .student-work-page .exam-title-card h1 {
+    margin: 0;
+    font-size: clamp(18px, 5vw, 22px);
+    line-height: 1.3;
+  }
+
+  .student-work-page .exam-title-stats {
+    min-width: 58px;
+  }
+
+  .student-work-page .exam-section-header {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .student-work-page .exam-section-header > span {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .student-work-page .exam-section-header h2 {
+    font-size: 15px;
+    line-height: 1.35;
+  }
+
+  .student-work-page .exam-section-header p {
+    font-size: 13px;
+  }
+
+  .student-work-page .exam-question-list {
+    gap: 12px;
+  }
+
+  .student-work-page .exam-question-card {
+    width: 100%;
+    overflow: hidden;
+    border-radius: 14px;
+  }
+
+  .student-work-page .exam-question-head {
+    grid-template-columns: 36px minmax(0, 1fr);
+    gap: 9px;
+    padding: 12px;
+  }
+
+  .student-work-page .exam-question-number {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+  }
+
+  .student-work-page .exam-question-title {
+    grid-column: 2;
+  }
+
+  .student-work-page .exam-point-badge {
+    grid-column: 2;
+    justify-self: start;
+    margin-top: 2px;
+  }
+
+  .student-work-page .exam-type-pill,
+  .student-work-page .review-badge {
+    display: inline-flex;
+    max-width: 100%;
+    margin-bottom: 6px;
+    white-space: normal;
+  }
+
+  .student-work-page .exam-question-text {
+    font-size: 16px;
+    line-height: 1.65;
+  }
+
+  .student-work-page .exam-answer-area {
+    padding: 10px 12px 14px;
+  }
+
+  .student-work-page .exam-mc-list {
+    gap: 9px;
+  }
+
+  .student-work-page .exam-mc-option {
+    grid-template-columns: 38px minmax(0, 1fr);
+    min-height: 52px;
+    padding: 9px 10px;
+  }
+
+  .student-work-page .exam-mc-check {
+    grid-column: 2;
+    justify-self: start;
+    text-align: left;
+  }
+
+  /* True/False becomes one statement + two large touch buttons. */
+  .student-work-page .exam-tf-header {
+    display: none;
+  }
+
+  .student-work-page .exam-tf-table {
+    display: grid;
+    gap: 10px;
+    background: transparent;
+  }
+
+  .student-work-page .exam-tf-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    overflow: hidden;
+    border: 1px solid rgba(15, 118, 110, 0.18);
+    border-radius: 12px;
+    background: var(--surface, #ffffff);
+  }
+
+  .student-work-page .exam-tf-statement {
+    grid-column: 1 / -1;
+    padding: 12px;
+    border-bottom: 1px solid rgba(15, 118, 110, 0.14);
+  }
+
+  .student-work-page .exam-tf-cell {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 52px;
+    border: 0;
+  }
+
+  .student-work-page .exam-tf-cell + .exam-tf-cell {
+    border-left: 1px solid rgba(15, 118, 110, 0.14);
+  }
+
+  .student-work-page .exam-tf-cell-true::before {
+    content: "Đúng";
+    font-weight: 700;
+  }
+
+  .student-work-page .exam-tf-cell-false::before {
+    content: "Sai";
+    font-weight: 700;
+  }
+
+  .student-work-page .exam-tf-progress {
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .student-work-page .exam-sa-hint {
+    align-items: flex-start;
+  }
+
+  .student-work-page .result-summary-body,
+  .student-work-page .result-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .student-work-page .result-summary-head {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .student-work-page .result-submitted-at {
+    width: 100%;
+  }
+
+  .student-work-page .exam-confirm-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Very narrow phones */
+@media (max-width: 390px) {
+  .student-work-page .exam-top-actions {
+    display: grid;
+    grid-template-columns: 1fr auto;
+  }
+
+  .student-work-page .exam-violation-badge {
+    grid-column: 1 / -1;
+  }
+
+  .student-work-page .exam-timer {
+    justify-self: start;
+  }
+
+  .student-work-page .exam-submit-top {
+    justify-self: end;
+  }
+
+  .student-work-page .exam-title-card {
+    grid-template-columns: 1fr;
+  }
+
+  .student-work-page .exam-title-stats {
+    justify-self: start;
+  }
+
+  .student-work-page .exam-bottom-submit {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Landscape phone: reduce sticky header height to leave room for the question. */
+@media (max-height: 520px) and (orientation: landscape) {
+  .student-work-page .exam-student-box span,
+  .student-work-page .exam-progress-text {
+    display: none;
+  }
+
+  .student-work-page .exam-progress-row {
+    margin-top: 4px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .student-work-page *,
+  .student-work-page *::before,
+  .student-work-page *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+/* ============================================================
+   Dán khối này vào CUỐI file StudentWorkRoom.mobile.css
+   ============================================================ */
+
+/* Dòng "💾 Đã lưu 14:32:07" trên thanh tiến độ.
+   Nằm trong .exam-progress-text (display:flex, space-between), chen vào giữa
+   số câu và phần trăm. */
+.student-work-page .exam-saved-at {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #ccfbf1;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+/* Máy hẹp: nhường chỗ cho số câu và phần trăm — hai thứ học sinh cần hơn. */
+@media (max-width: 420px) {
+  .student-work-page .exam-saved-at {
+    display: none;
+  }
+}

@@ -1,0 +1,16 @@
+EDUCENTER ESSAY WORD + MATHTYPE OLE — FINAL
+
+Đọc trước: HUONG-DAN-TRIEN-KHAI-CUOI.md
+
+Việc bắt buộc trước khi deploy:
+1. Điền 6 giá trị Firebase Web trong src/config/firebase.ts.
+2. Tạo biến VITE_MATHTYPE_SERVER_URL trỏ đến backend MathType hiện có.
+3. Tạo FIREBASE_SERVICE_ACCOUNT_JSON, ESSAY_APPS_SCRIPT_URL,
+   ESSAY_APPS_SCRIPT_SECRET và PUBLIC_APP_URL trên Vercel.
+4. Cấu hình Apps Script Properties và deploy URL /exec.
+5. Bật Google Authentication và Authorized domains trong Firebase.
+6. Chạy npm install && npm run build.
+
+Bản sửa Vercel ESM: 2026-08-06
+- Sửa import .js trong api/*.ts để tránh ERR_MODULE_NOT_FOUND.
+- Thêm scripts/check-api-esm.mjs và chạy trước build/lint.

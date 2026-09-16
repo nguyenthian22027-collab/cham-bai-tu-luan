@@ -1,0 +1,125 @@
+/* ============================================================================
+   mobile-fix.css — vá lỗi hiển thị trên điện thoại
+   ----------------------------------------------------------------------------
+   CÁCH DÙNG (chỉ 1 bước, KHÔNG cần sửa file nào đang có):
+
+     // src/main.tsx
+     import './index.css';
+     import './mobile-fix.css';   // ⬅️ THÊM DÒNG NÀY, đặt SAU index.css
+
+   Đây chính là phần "<style> mobile-fix" mà ExamRoom.tsx nhắc tới ở dòng 11
+   nhưng chưa từng được chép sang dự án này.
+   ============================================================================ */
+
+
+/* ──────────────────────────────────────────────────────────────────────────
+   1. MATHJAX — NGUYÊN NHÂN CHÍNH CỦA LỖI "SO =" BỊ CẮT CỤT
+
+   MathJax v3 render mỗi công thức thành MỘT khối liền, không thể tự xuống
+   dòng. Công thức dài như $SK = 5cm, AB = 6cm, SO = 3\sqrt{2}cm$ sẽ tràn ra
+   khỏi thẻ cha, rồi bị `overflow: hidden` của .exam-question-card cắt mất —
+   học sinh không cuộn tới được.
+
+   Cách chặn đúng là ở TẦNG GỐC: ép mjx-container không bao giờ rộng quá cha,
+   và nếu vẫn dài thì cho cuộn ngang TẠI CHỖ. Khi công thức không còn tràn ra
+   ngoài, `overflow: hidden` của cha không có gì để cắt → giữ được bo góc.
+
+   Để global (không bọc .student-work-page) vì màn chấm bài, xem lại đề,
+   duyệt đề... đều render MathText và đều dính lỗi này.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* Công thức INLINE: $...$ — đây là loại đề của bạn đang dùng */
+mjx-container:not([display="true"]) {
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  vertical-align: middle;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+/* Công thức KHỐI: $$...$$ hoặc \[...\] */
+mjx-container[display="true"] {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 4px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+/* Thanh cuộn của công thức: mảnh, chỉ hiện khi thật sự có gì để cuộn */
+mjx-container::-webkit-scrollbar {
+  height: 4px;
+}
+mjx-container::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.5);
+  border-radius: 999px;
+}
+
+/* MathJax chưa render xong thì chuỗi "$...$" thô cũng phải biết xuống dòng,
+   nếu không nó tự đẩy vỡ layout trong khoảnh khắc đầu tiên. */
+.exam-question-text,
+.exam-option-text,
+.exam-tf-text,
+.question-text {
+  overflow-wrap: anywhere;
+}
+
+
+/* ──────────────────────────────────────────────────────────────────────────
+   2. THANH "LƯU NHÁP / NỘP BÀI" ĐANG ĐÈ LÊN ĐỀ BÀI
+
+   .exam-bottom-submit là position:sticky nhưng .examroom-main không chừa chỗ
+   cho nó → câu cuối (hình chóp trong ảnh bạn chụp) bị che.
+   Nền cũ rgba(102,126,234,.14) trong suốt làm chữ chồng lên chữ.
+
+   Specificity: index.css dùng `.examroom-main` (0,1,0), ở đây (0,2,0) → luôn
+   thắng bất kể thứ tự import.
+   ────────────────────────────────────────────────────────────────────────── */
+
+.student-work-page .examroom-main {
+  padding-bottom: calc(124px + env(safe-area-inset-bottom, 0));
+}
+
+/* Nhân đôi class để lên (0,3,0), chắc chắn thắng StudentWorkRoom.mobile.css
+   (cùng 0,2,0 nên nếu chỉ viết 1 lần sẽ phụ thuộc thứ tự bundle của Vite). */
+.student-work-page .exam-bottom-submit.exam-bottom-submit {
+  background: #ffffff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.16);
+}
+
+
+/* ──────────────────────────────────────────────────────────────────────────
+   3. BADGE ĐIỂM "1đ" BỊ ĐẨY LỆCH
+
+   index.css @media(max-width:700px) có `.exam-point-badge { margin-left: 54px }`
+   — dòng này sinh ra từ thời badge nằm dưới số thứ tự câu. Nay mobile.css đã
+   đưa badge về grid-column 2 rồi nên 54px thành thừa.
+   ────────────────────────────────────────────────────────────────────────── */
+
+@media (max-width: 700px) {
+  .student-work-page .exam-point-badge {
+    margin-left: 0;
+  }
+}
+
+
+/* ──────────────────────────────────────────────────────────────────────────
+   4. iOS SAFARI TỰ PHÓNG TO KHI CHẠM Ô NHẬP
+
+   Safari zoom vào bất kỳ input nào có font-size < 16px. ExamRoom né bằng
+   `text-base` (dòng 1204). Ở đây làm tương đương cho MathLive + input dự phòng.
+   ────────────────────────────────────────────────────────────────────────── */
+
+.student-work-page math-field,
+.student-work-page .exam-short-input,
+.student-work-page input[type="text"],
+.student-work-page textarea {
+  font-size: 16px;
+}
