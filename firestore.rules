@@ -19,19 +19,19 @@ service cloud.firestore {
     }
 
     function admin() {
-      return approved() && profile().role == 'ADMIN';
+      return approved() && (profile().role == 'ADMIN' || profile().role == 'admin');
     }
 
     function staff() {
-      return approved() && profile().role in ['ADMIN', 'TEACHER', 'TA'];
+      return approved() && (profile().role in ['ADMIN', 'TEACHER', 'TA', 'admin', 'teacher', 'ta']);
     }
 
     function teacherOrAdmin() {
-      return approved() && profile().role in ['ADMIN', 'TEACHER'];
+      return approved() && (profile().role in ['ADMIN', 'TEACHER', 'admin', 'teacher']);
     }
 
     function student() {
-      return approved() && profile().role == 'STUDENT';
+      return approved() && (profile().role == 'STUDENT' || profile().role == 'student');
     }
 
     function myStudentId() {

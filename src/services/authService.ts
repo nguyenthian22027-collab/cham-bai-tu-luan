@@ -32,7 +32,7 @@ const mapUser = (id: string, data: Record<string, unknown>): AppUser => ({
   name: (data.name as string) || '',
   email: data.email as string | undefined,
   avatar: data.avatar as string | undefined,
-  role: (data.role as Role) || Role.TEACHER,
+  role: (String(data.role || '').toUpperCase() as Role) || Role.TEACHER,
   isApproved: (data.isApproved as boolean) ?? false,
   createdAt: toDate(data.createdAt),
   studentId: data.studentId as string | undefined,
