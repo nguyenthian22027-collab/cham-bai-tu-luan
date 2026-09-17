@@ -13,7 +13,7 @@
  */
 
 const ESSAY_CONFIG = {
-  DEFAULT_MODEL: 'gemini-3.6-flash',
+  DEFAULT_MODEL: 'gemini-1.5-flash',
   DEFAULT_FOLDER: 'EduCenter Essay Images',
   MAX_IMAGE_BYTES: 4 * 1024 * 1024,
   MAX_IMAGES_PER_GRADE: 8,
@@ -21,7 +21,7 @@ const ESSAY_CONFIG = {
 };
 
 function doGet() {
-  return jsonResponse_({ success: true, service: 'educenter-essay-bridge', version: '1.2.2' });
+  return jsonResponse_({ success: true, service: 'educenter-essay-bridge', version: '1.2.3' });
 }
 
 /**
@@ -149,11 +149,19 @@ function deleteImages_(body) {
   return { deleted: deleted, failed: failed };
 }
 
+function getGeminiApiKeys_(props) {
+  const raw = props.getProperty('GEMINI_API_KEYS') || props.getProperty('GEMINI_API_KEY') || '';
+  return raw
+    .split(/[\n,;]+/)
+    .map(function (k) { return k.trim(); })
+    .filter(Boolean);
+}
+
 function gradeEssay_(body) {
   const props = PropertiesService.getScriptProperties();
-  const apiKey = props.getProperty('GEMINI_API_KEY');
+  const keys = getGeminiApiKeys_(props);
   const model = props.getProperty('GEMINI_MODEL') || ESSAY_CONFIG.DEFAULT_MODEL;
-  if (!apiKey) throw new Error('Chưa cấu hình Script Property GEMINI_API_KEY.');
+  if (!keys.length) throw new Error('Chưa cấu hình Script Property GEMINI_API_KEY (hoặc GEMINI_API_KEYS).');
 
   const maxScore = Math.max(0.25, Math.min(100, Number(body.maxScore) || 1));
   const answer = body.answer || {};
@@ -174,7 +182,6 @@ function gradeEssay_(body) {
     });
   });
 
-  const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(apiKey);
   const payload = {
     contents: [{ role: 'user', parts: parts }],
     generationConfig: {
@@ -182,31 +189,52 @@ function gradeEssay_(body) {
     }
   };
 
-  const response = UrlFetchApp.fetch(endpoint, {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
-  });
+  // Chia đều tải (load-balancing) ngẫu nhiên giữa các key và tự động thử key tiếp theo nếu gặp giới hạn rate-limit (429/403)
+  const startIndex = Math.floor(Math.random() * keys.length);
+  let lastError = null;
 
-  const status = response.getResponseCode();
-  const raw = response.getContentText();
-  if (status < 200 || status >= 300) throw new Error('Gemini lỗi ' + status + ': ' + raw.slice(0, 500));
+  for (let attempt = 0; attempt < keys.length; attempt++) {
+    const currentKey = keys[(startIndex + attempt) % keys.length];
+    const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(currentKey);
 
-  const envelope = JSON.parse(raw);
-  const text = envelope && envelope.candidates && envelope.candidates[0] && envelope.candidates[0].content && envelope.candidates[0].content.parts && envelope.candidates[0].content.parts[0] && envelope.candidates[0].content.parts[0].text;
-  if (!text) throw new Error('Gemini không trả kết quả chấm.');
+    const response = UrlFetchApp.fetch(endpoint, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
 
-  const parsed = parseGeminiJson_(text);
-  const score = Math.max(0, Math.min(maxScore, Number(parsed.score) || 0));
-  const steps = Array.isArray(parsed.steps) ? parsed.steps.map(normalizeStep_) : [];
-  return {
-    score: score,
-    maxScore: maxScore,
-    summary: String(parsed.summary || ''),
-    feedbackMarkdown: String(parsed.feedbackMarkdown || parsed.feedback || parsed.summary || ''),
-    steps: steps
-  };
+    const status = response.getResponseCode();
+    const raw = response.getContentText();
+
+    // Nếu gặp rate-limit 429 hoặc lỗi quota 403, tự động chuyển sang API key tiếp theo
+    if (status === 429 || (status === 403 && /quota|limit|exhausted/i.test(raw))) {
+      console.warn('API key ' + (attempt + 1) + '/' + keys.length + ' bị giới hạn (' + status + '). Đang thử key tiếp theo...');
+      lastError = new Error('Gemini key hết lượt (' + status + '): ' + raw.slice(0, 300));
+      continue;
+    }
+
+    if (status < 200 || status >= 300) {
+      throw new Error('Gemini lỗi ' + status + ': ' + raw.slice(0, 500));
+    }
+
+    const envelope = JSON.parse(raw);
+    const text = envelope && envelope.candidates && envelope.candidates[0] && envelope.candidates[0].content && envelope.candidates[0].content.parts && envelope.candidates[0].content.parts[0] && envelope.candidates[0].content.parts[0].text;
+    if (!text) throw new Error('Gemini không trả kết quả chấm.');
+
+    const parsed = parseGeminiJson_(text);
+    const score = Math.max(0, Math.min(maxScore, Number(parsed.score) || 0));
+    const steps = Array.isArray(parsed.steps) ? parsed.steps.map(normalizeStep_) : [];
+    return {
+      score: score,
+      maxScore: maxScore,
+      summary: String(parsed.summary || ''),
+      feedbackMarkdown: String(parsed.feedbackMarkdown || parsed.feedback || parsed.summary || ''),
+      steps: steps
+    };
+  }
+
+  throw lastError || new Error('Tất cả API key Gemini đều đã hết hạn mức (quota). Hãy thêm key mới vào GEMINI_API_KEY.');
 }
 
 function buildPrompt_(questionText, rubric, studentText, maxScore) {

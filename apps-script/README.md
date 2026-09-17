@@ -9,8 +9,8 @@ Trong Apps Script vào **Project Settings → Script properties**, tạo:
 | Tên | Bắt buộc | Giá trị |
 |---|---:|---|
 | `API_SECRET` | Có | Chuỗi bí mật dài, phải giống `ESSAY_APPS_SCRIPT_SECRET` trên Vercel |
-| `GEMINI_API_KEY` | Có | API key Gemini; tuyệt đối không đặt trong mã React |
-| `GEMINI_MODEL` | Không | Mặc định `gemini-3.6-flash`; có thể đổi khi model tài khoản hỗ trợ thay đổi |
+| `GEMINI_API_KEY` | Có | API key Gemini (hỗ trợ nhiều key cách nhau bằng dấu phẩy `,` để tự động chia tải và dự phòng khi hết lượt) |
+| `GEMINI_MODEL` | Không | Mặc định `gemini-1.5-flash` (hoặc `gemini-2.0-flash`) |
 | `DRIVE_FOLDER_ID` | Không | ID thư mục Drive. Bỏ trống để script tự tạo `EduCenter Essay Images` |
 
 ## Deploy
