@@ -13,7 +13,7 @@
  */
 
 const ESSAY_CONFIG = {
-  DEFAULT_MODEL: 'gemini-1.5-flash',
+  DEFAULT_MODEL: 'gemini-3.6-flash',
   DEFAULT_FOLDER: 'EduCenter Essay Images',
   MAX_IMAGE_BYTES: 4 * 1024 * 1024,
   MAX_IMAGES_PER_GRADE: 8,
@@ -150,11 +150,29 @@ function deleteImages_(body) {
 }
 
 function getGeminiApiKeys_(props) {
+  const allKeys = [];
   const raw = props.getProperty('GEMINI_API_KEYS') || props.getProperty('GEMINI_API_KEY') || '';
-  return raw
-    .split(/[\n,;]+/)
-    .map(function (k) { return k.trim(); })
-    .filter(Boolean);
+  if (raw) {
+    raw.split(/[\n,;]+/).forEach(function (k) {
+      const trimmed = k.trim();
+      if (trimmed && allKeys.indexOf(trimmed) === -1) allKeys.push(trimmed);
+    });
+  }
+
+  // Hỗ trợ thêm dạng đặt riêng từng dòng: GEMINI_API_KEY_1, GEMINI_API_KEY_2, GEMINI_API_KEY_3...
+  try {
+    const allProps = props.getProperties();
+    Object.keys(allProps).forEach(function (propName) {
+      if (/^GEMINI_API_KEY_\d+$/i.test(propName)) {
+        const val = String(allProps[propName] || '').trim();
+        if (val && allKeys.indexOf(val) === -1) allKeys.push(val);
+      }
+    });
+  } catch (e) {
+    // fallback nếu không đọc được getProperties
+  }
+
+  return allKeys;
 }
 
 function gradeEssay_(body) {
