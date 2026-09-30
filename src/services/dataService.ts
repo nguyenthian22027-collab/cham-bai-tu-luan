@@ -66,9 +66,9 @@ const mapClass = (id: string, d: Record<string, unknown>): ClassItem => ({
   createdAt: toDate(d.createdAt),
 });
 
-/** Admin sees all classes; teacher/TA sees only assigned classes. */
+/** Admin and Teacher see all classes; TA sees only assigned classes. */
 export const getClasses = async (user: AppUser): Promise<ClassItem[]> => {
-  if (user.role === Role.ADMIN) {
+  if (user.role === Role.ADMIN || user.role === Role.TEACHER) {
     const snap = await getDocs(collection(db, 'classes'));
     return snap.docs
       .map((d) => mapClass(d.id, d.data()))

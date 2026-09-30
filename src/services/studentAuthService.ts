@@ -21,6 +21,7 @@ import {
 import { auth, db, studentCreatorAuth } from '../config/firebase';
 import { AppUser, CreateStudentAccountInput, Role, StudentAccount } from '../types';
 import { getUserProfile } from './authService';
+import * as XLSX from 'xlsx';
 
 const STUDENT_EMAIL_DOMAIN = 'student.local';
 
@@ -190,3 +191,203 @@ export async function changeCurrentStudentPassword(currentPassword: string, newP
   await reauthenticateWithCredential(current, credential);
   await updatePassword(current, newPassword);
 }
+
+/**
+ * Sinh tên đăng nhập không dấu, ngắn gọn, chuẩn hóa.
+ * Ví dụ: "Nguyễn Văn An" lớp "11A1" -> "annv_11a1"
+ */
+export function generateStudentUsername(
+  fullName: string,
+  className?: string,
+  usedUsernames?: Set<string>
+): string {
+  const noTone = fullName
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D');
+
+  const parts = noTone
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (!parts.length) {
+    const fallback = `hs_${Math.floor(1000 + Math.random() * 9000)}`;
+    if (usedUsernames) usedUsernames.add(fallback);
+    return fallback;
+  }
+
+  const firstName = parts[parts.length - 1]; // "an"
+  const initials = parts.slice(0, -1).map((p) => p[0]).join(''); // "nv"
+
+  const cleanClass = className
+    ? className
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/Đ/g, 'D')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '')
+        .slice(-6)
+    : '';
+
+  const base = cleanClass ? `${firstName}${initials}_${cleanClass}` : `${firstName}${initials}`;
+  let candidate = base.slice(0, 24);
+  if (candidate.length < 3) candidate = `${candidate}_hs`;
+
+  let finalUsername = candidate;
+  let counter = 1;
+  while (usedUsernames && usedUsernames.has(finalUsername)) {
+    finalUsername = `${candidate}_${counter}`;
+    counter++;
+  }
+
+  if (usedUsernames) usedUsernames.add(finalUsername);
+  return finalUsername;
+}
+
+export interface BatchCreateStudentInput {
+  students: Array<{ id: string; fullName: string }>;
+  classId: string;
+  className: string;
+  defaultPassword?: string;
+  createdBy?: string;
+  onProgress?: (info: { current: number; total: number; currentName: string; percent: number }) => void;
+}
+
+export interface BatchCreateStudentResult {
+  success: Array<{
+    studentId: string;
+    studentName: string;
+    username: string;
+    password: string;
+    className: string;
+  }>;
+  skipped: Array<{
+    studentId: string;
+    studentName: string;
+    reason: string;
+  }>;
+  errors: Array<{
+    studentId: string;
+    studentName: string;
+    error: string;
+  }>;
+}
+
+/**
+ * Tạo tài khoản hàng loạt cho danh sách học sinh của một lớp.
+ * Tự động bỏ qua học sinh đã có tài khoản để tránh tạo đè.
+ */
+export async function batchCreateStudentAccounts(
+  input: BatchCreateStudentInput
+): Promise<BatchCreateStudentResult> {
+  const { students, classId, className, defaultPassword = '123456', createdBy, onProgress } = input;
+
+  const existingAccounts = await getStudentAccounts();
+  const existingStudentIds = new Set(existingAccounts.map((a) => a.studentId));
+  const usedUsernames = new Set(existingAccounts.map((a) => a.username.toLowerCase()));
+
+  const result: BatchCreateStudentResult = {
+    success: [],
+    skipped: [],
+    errors: [],
+  };
+
+  const total = students.length;
+  let current = 0;
+
+  for (const s of students) {
+    current++;
+    onProgress?.({
+      current,
+      total,
+      currentName: s.fullName,
+      percent: Math.round((current / total) * 100),
+    });
+
+    if (existingStudentIds.has(s.id)) {
+      const existingAcc = existingAccounts.find((a) => a.studentId === s.id);
+      result.skipped.push({
+        studentId: s.id,
+        studentName: s.fullName,
+        reason: `Đã có tài khoản (${existingAcc?.username || 'đã tồn tại'})`,
+      });
+      continue;
+    }
+
+    try {
+      const username = generateStudentUsername(s.fullName, className, usedUsernames);
+      await createStudentLoginAccount({
+        username,
+        password: defaultPassword,
+        studentId: s.id,
+        studentName: s.fullName,
+        classIds: [classId],
+        className,
+        createdBy,
+      });
+
+      result.success.push({
+        studentId: s.id,
+        studentName: s.fullName,
+        username,
+        password: defaultPassword,
+        className,
+      });
+
+      // Tránh dồn dập request lên client auth
+      await new Promise((r) => setTimeout(r, 120));
+    } catch (err) {
+      result.errors.push({
+        studentId: s.id,
+        studentName: s.fullName,
+        error: err instanceof Error ? err.message : 'Lỗi tạo tài khoản',
+      });
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Xuất danh sách tài khoản học sinh ra file Excel (.xlsx).
+ */
+export function exportStudentAccountsToExcel(
+  items: Array<{
+    studentName: string;
+    className?: string;
+    username: string;
+    password?: string;
+    status?: string;
+  }>,
+  fileName = 'danh_sach_tai_khoan_hoc_sinh.xlsx'
+) {
+  const headers = ['STT', 'Họ và tên học sinh', 'Lớp', 'Tên đăng nhập', 'Mật khẩu khởi tạo', 'Trạng thái'];
+  const rows = items.map((item, idx) => [
+    idx + 1,
+    item.studentName,
+    item.className || '',
+    item.username,
+    item.password || '123456',
+    item.status || 'Đang hoạt động',
+  ]);
+
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  ws['!cols'] = [
+    { wch: 6 },
+    { wch: 26 },
+    { wch: 14 },
+    { wch: 22 },
+    { wch: 20 },
+    { wch: 16 },
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'TaiKhoan');
+  XLSX.writeFile(wb, fileName);
+}
+

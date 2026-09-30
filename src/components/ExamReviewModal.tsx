@@ -203,10 +203,12 @@ function QuestionPreviewCard({
 
       {q.images?.length ? (
         <div className="question-images">
-          {q.images.map((img, i) => {
-            const src = imageSrc(img);
-            return src ? <img key={i} src={src} alt={img.filename || `Hình ${i + 1}`} /> : null;
-          })}
+          {q.images
+            .filter((img) => !img.base64 || !q.text?.includes(img.base64.slice(0, 30)))
+            .map((img, i) => {
+              const src = imageSrc(img);
+              return src ? <img key={i} src={src} alt={img.filename || `Hình ${i + 1}`} /> : null;
+            })}
         </div>
       ) : null}
 
@@ -236,10 +238,12 @@ function QuestionPreviewCard({
         <div style={{ marginTop: 8, padding: '0.75rem', background: 'var(--bg-light)', borderRadius: 'var(--radius-sm)' }}>
           <strong>Hình trong file đáp án:</strong>
           <div className="question-images" style={{ marginTop: 8 }}>
-            {q.solutionImages.map((img, i) => {
-              const src = imageSrc(img);
-              return src ? <img key={i} src={src} alt={img.filename || `Hình đáp án ${i + 1}`} /> : null;
-            })}
+            {q.solutionImages
+              .filter((img) => !img.base64 || !q.solution?.includes(img.base64.slice(0, 30)))
+              .map((img, i) => {
+                const src = imageSrc(img);
+                return src ? <img key={i} src={src} alt={img.filename || `Hình đáp án ${i + 1}`} /> : null;
+              })}
           </div>
           <small style={{ color: 'var(--text-muted)' }}>Các hình này chỉ để giáo viên đối chiếu, không gửi sang Gemini mặc định.</small>
         </div>

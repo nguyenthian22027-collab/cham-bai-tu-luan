@@ -11,6 +11,9 @@ import {
   Upload,
   FileDown,
   Trash2,
+  Download,
+  KeyRound,
+  Zap,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -30,7 +33,13 @@ import {
   fmtDate,
 } from '../services/dataService';
 import { getAllUsers } from '../services/authService';
-import { AppUser, ClassItem, Role, Status, Student } from '../types';
+import {
+  batchCreateStudentAccounts,
+  BatchCreateStudentResult,
+  exportStudentAccountsToExcel,
+  getStudentAccounts,
+} from '../services/studentAuthService';
+import { AppUser, ClassItem, Role, Status, Student, StudentAccount } from '../types';
 import Modal from '../components/Modal';
 
 interface ClassForm {
@@ -137,6 +146,7 @@ export default function Classes() {
   const toast = useToast();
   const rosterFileInputRef = useRef<HTMLInputElement | null>(null);
   const isAdmin = user?.role === Role.ADMIN;
+  const canManage = isAdmin || user?.role === Role.TEACHER;
 
   const [classes, setClasses] = useState<ClassItem[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -161,6 +171,19 @@ export default function Classes() {
   const [assignTeacherId, setAssignTeacherId] = useState('');
   const [assigning, setAssigning] = useState(false);
   const [q, setQ] = useState('');
+
+  // Batch accounts for current class
+  const [showClassAccountModal, setShowClassAccountModal] = useState(false);
+  const [classBatchPassword, setClassBatchPassword] = useState('123456');
+  const [classBatchRunning, setClassBatchRunning] = useState(false);
+  const [classBatchProgress, setClassBatchProgress] = useState<{
+    current: number;
+    total: number;
+    currentName: string;
+    percent: number;
+  } | null>(null);
+  const [classExistingAccountIds, setClassExistingAccountIds] = useState<Set<string>>(new Set());
+  const [classBatchResult, setClassBatchResult] = useState<BatchCreateStudentResult | null>(null);
 
   useEffect(() => {
     loadAll();
@@ -346,10 +369,110 @@ export default function Classes() {
       if (result.errors.length) {
         console.warn('Import học sinh vào lớp có cảnh báo:', result.errors);
       }
+
+      // Nếu có học sinh mới, gợi ý mở modal cấp tài khoản ngay
+      if (result.created > 0 || result.enrolled > 0) {
+        setTimeout(() => {
+          handleOpenClassAccountModal();
+        }, 400);
+      }
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Lỗi import Excel', 'error');
     } finally {
       setImportingRoster(false);
+    }
+  }
+
+  async function handleOpenClassAccountModal() {
+    if (!detail) return;
+    setShowClassAccountModal(true);
+    setClassBatchProgress(null);
+    setClassBatchResult(null);
+    try {
+      const allAccs = await getStudentAccounts();
+      setClassExistingAccountIds(new Set(allAccs.map((a) => a.studentId)));
+    } catch {
+      // ignore
+    }
+  }
+
+  async function handleExportClassAccounts() {
+    if (!detail) return;
+    try {
+      const allAccs = await getStudentAccounts();
+      const rosterIds = new Set(roster.map((s) => s.id));
+      const classAccs = allAccs.filter((a) => rosterIds.has(a.studentId));
+
+      if (classAccs.length === 0) {
+        toast(`Lớp "${detail.className}" chưa có tài khoản nào. Hãy bấm "Cấp tài khoản lớp" trước.`, 'warning');
+        return;
+      }
+
+      exportStudentAccountsToExcel(
+        classAccs.map((a) => ({
+          studentName: a.studentName,
+          className: detail.className,
+          username: a.username,
+          password: 'Đã kích hoạt',
+          status: a.isActive ? 'Đang hoạt động' : 'Đã khóa',
+        })),
+        `tai_khoan_lop_${detail.className.replace(/\s+/g, '_')}.xlsx`
+      );
+      toast(`Đã xuất danh sách ${classAccs.length} tài khoản của lớp ${detail.className}`, 'success');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Lỗi xuất file Excel', 'error');
+    }
+  }
+
+  async function runClassBatchCreate() {
+    if (!detail) return;
+    const studentsWithoutAccount = roster.filter((s) => !classExistingAccountIds.has(s.id));
+    if (studentsWithoutAccount.length === 0) {
+      toast('Tất cả học sinh trong lớp này đã có tài khoản!', 'warning');
+      return;
+    }
+    if (!classBatchPassword || classBatchPassword.length < 6) {
+      toast('Mật khẩu cần tối thiểu 6 ký tự', 'warning');
+      return;
+    }
+
+    setClassBatchRunning(true);
+    setClassBatchProgress(null);
+    setClassBatchResult(null);
+
+    try {
+      const res = await batchCreateStudentAccounts({
+        students: studentsWithoutAccount,
+        classId: detail.id,
+        className: detail.className,
+        defaultPassword: classBatchPassword,
+        createdBy: user?.id,
+        onProgress: (p) => setClassBatchProgress(p),
+      });
+
+      setClassBatchResult(res);
+
+      if (res.success.length > 0) {
+        toast(`Đã tạo thành công ${res.success.length} tài khoản cho lớp ${detail.className}`, 'success');
+        exportStudentAccountsToExcel(
+          res.success.map((item) => ({
+            studentName: item.studentName,
+            className: item.className,
+            username: item.username,
+            password: item.password,
+            status: 'Đã kích hoạt',
+          })),
+          `tai_khoan_lop_${detail.className.replace(/\s+/g, '_')}.xlsx`
+        );
+        const allAccs = await getStudentAccounts();
+        setClassExistingAccountIds(new Set(allAccs.map((a) => a.studentId)));
+      } else if (res.errors.length > 0) {
+        toast('Có lỗi trong quá trình tạo tài khoản', 'error');
+      }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Lỗi tạo tài khoản', 'error');
+    } finally {
+      setClassBatchRunning(false);
     }
   }
 
@@ -429,7 +552,7 @@ export default function Classes() {
             <School size={26} /> <span>Lớp học</span>
           </h1>
           <p className="page-sub">
-            {isAdmin
+            {canManage
               ? `Quản lý ${classes.length} lớp học`
               : `${classes.length} lớp được phân công`}
           </p>
@@ -443,7 +566,7 @@ export default function Classes() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        {isAdmin && (
+        {canManage && (
           <button className="btn btn-primary" onClick={openAdd}>
             + Tạo lớp mới
           </button>
@@ -459,10 +582,15 @@ export default function Classes() {
               </div>
               <h3>Chưa có lớp học nào</h3>
               <p>
-                {isAdmin
-                  ? 'Nhấn "Tạo lớp mới" để bắt đầu'
+                {canManage
+                  ? 'Nhấn "+ Tạo lớp mới" ở trên để bắt đầu'
                   : 'Chưa có lớp nào được phân công cho bạn'}
               </p>
+              {canManage && (
+                <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={openAdd}>
+                  + Tạo lớp mới
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -509,7 +637,7 @@ export default function Classes() {
                 <div style={{ color: 'var(--text-muted)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Calendar size={14} /> {cls.startDate ? fmtDate(cls.startDate) : 'Chưa rõ ngày'}
                 </div>
-                {isAdmin && (
+                {canManage && (
                   <div style={{ marginTop: 10 }}>
                     <button
                       className="btn btn-secondary btn-sm"
@@ -714,6 +842,27 @@ export default function Classes() {
                       >
                         <Upload size={14} /> {importingRoster ? 'Đang import...' : 'Import vào lớp'}
                       </button>
+
+                      <button
+                        className="btn btn-primary btn-sm"
+                        style={{
+                          background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+                          color: '#fff',
+                          fontWeight: 600,
+                        }}
+                        onClick={handleOpenClassAccountModal}
+                        title="Tự động tạo tài khoản đăng nhập cho toàn bộ học sinh lớp"
+                      >
+                        <Zap size={14} /> Cấp tài khoản lớp
+                      </button>
+
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={handleExportClassAccounts}
+                        title="Xuất file Excel danh sách tài khoản học sinh lớp"
+                      >
+                        <Download size={14} /> Xuất tài khoản
+                      </button>
                     </div>
 
                     {selectedRosterIds.size > 0 && (
@@ -885,6 +1034,133 @@ export default function Classes() {
             )}
           </>
         )}
+      </Modal>
+
+      {/* Modal Cấp tài khoản cho lớp */}
+      <Modal
+        open={showClassAccountModal}
+        onClose={() => !classBatchRunning && setShowClassAccountModal(false)}
+        title={`⚡ Cấp tài khoản học sinh — Lớp ${detail?.className || ''}`}
+        footer={
+          <>
+            <button
+              className="btn btn-ghost"
+              onClick={() => setShowClassAccountModal(false)}
+              disabled={classBatchRunning}
+            >
+              Đóng
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={runClassBatchCreate}
+              disabled={
+                classBatchRunning ||
+                !detail ||
+                roster.filter((s) => !classExistingAccountIds.has(s.id)).length === 0
+              }
+            >
+              {classBatchRunning ? (
+                <>Đang tạo ({classBatchProgress?.percent || 0}%)...</>
+              ) : (
+                `Tạo tài khoản (${
+                  roster.filter((s) => !classExistingAccountIds.has(s.id)).length
+                } em)`
+              )}
+            </button>
+          </>
+        }
+      >
+        <div
+          style={{
+            padding: 12,
+            background: 'var(--bg-muted, #f8fafc)',
+            borderRadius: 'var(--radius-sm)',
+            marginBottom: 16,
+            border: '1px solid var(--border)',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span>Học sinh trong lớp:</span>
+            <strong>{roster.length} em</strong>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, color: '#10b981' }}>
+            <span>Đã có tài khoản:</span>
+            <strong>{roster.filter((s) => classExistingAccountIds.has(s.id)).length} em</strong>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#6366f1', fontWeight: 600 }}>
+            <span>Chưa có tài khoản (cần tạo):</span>
+            <strong>{roster.filter((s) => !classExistingAccountIds.has(s.id)).length} em</strong>
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Mật khẩu ban đầu mặc định cho học sinh</label>
+          <input
+            className="form-control"
+            value={classBatchPassword}
+            disabled={classBatchRunning}
+            onChange={(e) => setClassBatchPassword(e.target.value)}
+            placeholder="Ví dụ: 123456"
+          />
+          <small style={{ color: 'var(--text-muted)', display: 'block', marginTop: 4 }}>
+            Học sinh đăng nhập tại <strong>/student-login</strong> bằng Tên đăng nhập và Mật khẩu này.
+          </small>
+        </div>
+
+        {classBatchRunning && classBatchProgress && (
+          <div style={{ margin: '16px 0', padding: 12, background: 'rgba(99, 102, 241, 0.08)', borderRadius: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: '0.875rem' }}>
+              <span>Đang tạo: <strong>{classBatchProgress.currentName}</strong></span>
+              <span>{classBatchProgress.current}/{classBatchProgress.total} ({classBatchProgress.percent}%)</span>
+            </div>
+            <div style={{ width: '100%', height: 8, background: '#e2e8f0', borderRadius: 4, overflow: 'hidden' }}>
+              <div
+                style={{
+                  width: `${classBatchProgress.percent}%`,
+                  height: '100%',
+                  background: 'linear-gradient(90deg, #6366f1, #a855f7)',
+                  transition: 'width 0.2s',
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {classBatchResult && (
+          <div style={{ margin: '14px 0', padding: 12, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8 }}>
+            <strong style={{ color: '#166534', display: 'block', marginBottom: 6 }}>
+              ✓ Đã tạo thành công {classBatchResult.success.length} tài khoản!
+            </strong>
+            <p style={{ margin: 0, fontSize: '0.875rem', color: '#15803d' }}>
+              File Excel danh sách tài khoản đã được tự động tải về máy của bạn.
+            </p>
+            {classBatchResult.success.length > 0 && (
+              <button
+                className="btn btn-secondary btn-sm"
+                style={{ marginTop: 10 }}
+                onClick={() => {
+                  if (!detail) return;
+                  exportStudentAccountsToExcel(
+                    classBatchResult.success.map((item) => ({
+                      studentName: item.studentName,
+                      className: item.className,
+                      username: item.username,
+                      password: item.password,
+                      status: 'Đã kích hoạt',
+                    })),
+                    `tai_khoan_lop_${detail.className.replace(/\s+/g, '_')}.xlsx`
+                  );
+                }}
+              >
+                <Download size={14} /> Tải lại file Excel
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="payment-warning" style={{ margin: 0 }}>
+          💡 <strong>Quy tắc sinh Username</strong>: Tên học sinh không dấu + tên lớp (Ví dụ: <code>annv_11a1</code>). Nếu trùng tên, hệ thống tự động đánh số phân biệt.
+        </div>
       </Modal>
     </div>
   );

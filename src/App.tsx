@@ -9,7 +9,6 @@ import PendingApproval from './pages/PendingApproval';
 import Classes from './pages/Classes';
 import Students from './pages/Students';
 import Users from './pages/Users';
-import ZaloConnection from './pages/ZaloConnection';
 import Assignments from './pages/Assignments';
 import AssignmentCreate from './pages/AssignmentCreate';
 import AssignmentMonitor from './pages/AssignmentMonitor';
@@ -84,7 +83,6 @@ function AppRoutes() {
       <Route path="/assignments/:assignmentId/monitor" element={<Protected roles={[Role.ADMIN, Role.TEACHER, Role.TA]}><AssignmentMonitor /></Protected>} />
       <Route path="/assignments/:assignmentId/grading" element={<Protected roles={[Role.ADMIN, Role.TEACHER, Role.TA]}><AssignmentGrading /></Protected>} />
       <Route path="/users" element={<Protected roles={[Role.ADMIN]}><Users /></Protected>} />
-      <Route path="/zalo-connection" element={<Protected roles={[Role.ADMIN]}><ZaloConnection /></Protected>} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

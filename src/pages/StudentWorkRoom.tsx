@@ -893,11 +893,13 @@ function QuestionBlock({ question, value, onChange, disabled, index, shuffleOpti
             <ResultBadge result={result} grade={grade} type={type} />
           )}
           <MathText html={question.text} block className="question-text exam-question-text" />
-          {imageUrls.length > 0 && (
+          {imageUrls.filter((url) => !question.text?.includes(url.slice(0, 30))).length > 0 && (
             <div className="exam-question-images">
-              {imageUrls.map((url, i) => (
-                <img key={i} src={url} alt={`Hình ${i + 1} - Câu ${index}`} />
-              ))}
+              {imageUrls
+                .filter((url) => !question.text?.includes(url.slice(0, 30)))
+                .map((url, i) => (
+                  <img key={i} src={url} alt={`Hình ${i + 1} - Câu ${index}`} />
+                ))}
             </div>
           )}
         </div>

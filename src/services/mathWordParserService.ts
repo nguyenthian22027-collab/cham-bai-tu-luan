@@ -42,6 +42,7 @@ interface ParagraphData {
   imageRIds: string[];
   hasUnderline: boolean;
   underlinedSegments: string[];
+  isTable?: boolean;
 }
 
 // ============================================================
@@ -70,8 +71,12 @@ function escapeHtmlPreserveLaTeX(text: string): string {
   const protect = (m: string): string => { blocks.push(m); return `__LB_${blocks.length - 1}__`; };
   text = text.replace(/\$\$([\s\S]*?)\$\$/g, protect);
   text = text.replace(/\$(?!\$)([\s\S]*?)\$(?!\$)/g, protect);
+  // Bảo vệ các thẻ HTML an toàn (bảng biểu, hình ảnh, định dạng) do hệ thống sinh ra
+  text = text.replace(/<\/?(?:table|thead|tbody|tfoot|tr|th|td|col|colgroup|img|div|span|p|br|b|i|strong|em|u|sub|sup)\b[^>]*\/?>/gi, protect);
   text = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  for (let i = 0; i < blocks.length; i++) text = text.replace(`__LB_${i}__`, blocks[i]);
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    text = text.replace(`__LB_${i}__`, blocks[i]);
+  }
   return text;
 }
 
@@ -199,28 +204,201 @@ async function convertOleToLatex(
 }
 
 // ============================================================
-// RAW XML PARAGRAPH EXTRACTOR
+// LIST NUMBERING TRACKER (word/numbering.xml)
+// ============================================================
+function formatListNumber(val: number, fmt: string): string {
+  if (fmt === 'lowerLetter') return String.fromCharCode(96 + ((val - 1) % 26) + 1);
+  if (fmt === 'upperLetter') return String.fromCharCode(64 + ((val - 1) % 26) + 1);
+  if (fmt === 'lowerRoman') {
+    const romans = ['', 'i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'];
+    return romans[val] || String(val);
+  }
+  if (fmt === 'upperRoman') {
+    const romans = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+    return romans[val] || String(val);
+  }
+  return String(val);
+}
+
+class NumberingTracker {
+  private counters = new Map<string, number>();
+  private numToAbstract = new Map<string, string>();
+  private abstractLevels = new Map<string, Map<string, { fmt: string; lvlText: string; start: number }>>();
+
+  constructor(numberingXml?: string) {
+    if (!numberingXml) return;
+
+    const absRe = /<w:abstractNum\b[^>]*w:abstractNumId="(\d+)"[\s\S]*?<\/w:abstractNum>/g;
+    let m: RegExpExecArray | null;
+    while ((m = absRe.exec(numberingXml)) !== null) {
+      const absId = m[1];
+      const absXml = m[0];
+      const lvlMap = new Map<string, { fmt: string; lvlText: string; start: number }>();
+      const lvlRe = /<w:lvl\b[^>]*w:ilvl="(\d+)"[\s\S]*?<\/w:lvl>/g;
+      let lm: RegExpExecArray | null;
+      while ((lm = lvlRe.exec(absXml)) !== null) {
+        const ilvl = lm[1];
+        const lXml = lm[0];
+        const fmt = lXml.match(/<w:numFmt\b[^>]*w:val="([^"]+)"/)?.[1] || 'decimal';
+        const lvlText = lXml.match(/<w:lvlText\b[^>]*w:val="([^"]+)"/)?.[1] || '%1.';
+        const start = parseInt(lXml.match(/<w:start\b[^>]*w:val="(\d+)"/)?.[1] || '1', 10);
+        lvlMap.set(ilvl, { fmt, lvlText, start });
+      }
+      this.abstractLevels.set(absId, lvlMap);
+    }
+
+    const numRe = /<w:num\b[^>]*w:numId="(\d+)"[\s\S]*?<\/w:num>/g;
+    while ((m = numRe.exec(numberingXml)) !== null) {
+      const numId = m[1];
+      const nXml = m[0];
+      const absId = nXml.match(/<w:abstractNumId\b[^>]*w:val="(\d+)"/)?.[1];
+      if (absId) this.numToAbstract.set(numId, absId);
+    }
+  }
+
+  nextPrefix(numId: string, ilvl = '0'): string {
+    const absId = this.numToAbstract.get(numId);
+    if (!absId) return '';
+    const lvlMap = this.abstractLevels.get(absId);
+    if (!lvlMap) return '';
+    const lvlInfo = lvlMap.get(ilvl);
+    if (!lvlInfo) return '';
+
+    const counterKey = `${numId}_${ilvl}`;
+    const currentVal = this.counters.get(counterKey) ?? (lvlInfo.start - 1);
+    const nextVal = currentVal + 1;
+    this.counters.set(counterKey, nextVal);
+
+    const formatted = formatListNumber(nextVal, lvlInfo.fmt);
+    let result = lvlInfo.lvlText.replace(new RegExp(`%${parseInt(ilvl, 10) + 1}`, 'g'), formatted);
+    result = result.replace(/%\d+/g, '');
+    return result;
+  }
+}
+
+// ============================================================
+// TABLE PARSER (w:tbl -> HTML)
+// ============================================================
+function parseWordTable(
+  tblXml: string,
+  oleLatexMap: Map<string, string> = new Map()
+): { html: string; imageRIds: string[] } {
+  const trRe = /<w:tr\b[\s\S]*?<\/w:tr>/g;
+  const tcRe = /<w:tc\b[\s\S]*?<\/w:tc>/g;
+  const runRe = /<w:r\b[\s\S]*?<\/w:r>/g;
+  const imageRIds: string[] = [];
+
+  const rows: Array<Array<{ text: string; colSpan: number }>> = [];
+  let trMatch: RegExpExecArray | null;
+  while ((trMatch = trRe.exec(tblXml)) !== null) {
+    const trXml = trMatch[0];
+    const cells: Array<{ text: string; colSpan: number }> = [];
+    let tcMatch: RegExpExecArray | null;
+    while ((tcMatch = tcRe.exec(trXml)) !== null) {
+      const tcXml = tcMatch[0];
+      const gridSpanMatch = tcXml.match(/<w:gridSpan\b[^>]*w:val="(\d+)"/);
+      const colSpan = gridSpanMatch ? parseInt(gridSpanMatch[1], 10) : 1;
+
+      let cellText = '';
+      let rm: RegExpExecArray | null;
+      runRe.lastIndex = 0;
+      while ((rm = runRe.exec(tcXml)) !== null) {
+        const runXml = rm[0];
+        const wtRe = /<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g;
+        let wm: RegExpExecArray | null;
+        while ((wm = wtRe.exec(runXml)) !== null) cellText += decodeXmlEntities(wm[1]);
+
+        const mtRe = /<m:t\b[^>]*>([\s\S]*?)<\/m:t>/g;
+        while ((wm = mtRe.exec(runXml)) !== null) cellText += wm[1];
+
+        if (/<w:tab\b/.test(runXml)) cellText += ' ';
+        if (/<(?:w:br|w:cr)\b/.test(runXml)) cellText += '<br>';
+
+        const oleM = runXml.match(/<o:OLEObject\b[^>]+r:id="(rId\d+)"/);
+        if (oleM) {
+          const latex = oleLatexMap.get(oleM[1]) ?? '';
+          if (latex) cellText += ` ${latex} `;
+        }
+      }
+
+      const blipRe = /r:embed="(rId\d+)"/g;
+      let im: RegExpExecArray | null;
+      while ((im = blipRe.exec(tcXml)) !== null) {
+        if (!imageRIds.includes(im[1])) imageRIds.push(im[1]);
+      }
+
+      cells.push({ text: cellText.trim(), colSpan });
+    }
+    if (cells.length > 0) rows.push(cells);
+  }
+
+  if (rows.length === 0) return { html: '', imageRIds: [] };
+
+  let html = '<div class="doc-table-wrap"><table class="doc-table"><tbody>';
+  for (const row of rows) {
+    html += '<tr>';
+    for (const cell of row) {
+      const spanAttr = cell.colSpan > 1 ? ` colspan="${cell.colSpan}"` : '';
+      html += `<td${spanAttr}>${cell.text}</td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table></div>';
+  return { html, imageRIds };
+}
+
+// ============================================================
+// RAW XML PARAGRAPH & TABLE EXTRACTOR
 // ============================================================
 function extractParagraphsRaw(
   documentXml: string,
-  oleLatexMap: Map<string, string>
+  oleLatexMap: Map<string, string>,
+  numberingTracker?: NumberingTracker
 ): ParagraphData[] {
-  const paragraphs: ParagraphData[] = [];
-  const paraRe = /<w:p\b[\s\S]*?<\/w:p>/g;
-  const runRe  = /<w:r\b[\s\S]*?<\/w:r>/g;
+  const bodyMatch = documentXml.match(/<w:body\b[^>]*>([\s\S]*?)<\/w:body>/);
+  const xmlToParse = bodyMatch ? bodyMatch[1] : documentXml;
 
-  let pm: RegExpExecArray | null;
-  while ((pm = paraRe.exec(documentXml)) !== null) {
-    const pXml = pm[0];
+  const topElemRe = /<(w:p|w:tbl)\b[\s\S]*?<\/\1>/g;
+  const runRe  = /<w:r\b[\s\S]*?<\/w:r>/g;
+  const paragraphs: ParagraphData[] = [];
+
+  let em: RegExpExecArray | null;
+  while ((em = topElemRe.exec(xmlToParse)) !== null) {
+    const tag = em[1];
+    const elemXml = em[0];
+
+    if (tag === 'w:tbl') {
+      const { html, imageRIds } = parseWordTable(elemXml, oleLatexMap);
+      if (html) {
+        paragraphs.push({
+          text: html,
+          imageRIds,
+          hasUnderline: false,
+          underlinedSegments: [],
+          isTable: true,
+        });
+      }
+      continue;
+    }
 
     let text = '';
     let hasUnderline = false;
     const underlinedSegments: string[] = [];
     const imageRIds: string[] = [];
 
+    const numPr = elemXml.match(/<w:numPr\b[\s\S]*?<\/w:numPr>/)?.[0];
+    if (numPr && numberingTracker) {
+      const numId = numPr.match(/<w:numId\b[^>]*w:val="(\d+)"/)?.[1];
+      const ilvl = numPr.match(/<w:ilvl\b[^>]*w:val="(\d+)"/)?.[1] || '0';
+      if (numId) {
+        const prefix = numberingTracker.nextPrefix(numId, ilvl);
+        if (prefix) text += `${prefix} `;
+      }
+    }
+
     let rm: RegExpExecArray | null;
     runRe.lastIndex = 0;
-    while ((rm = runRe.exec(pXml)) !== null) {
+    while ((rm = runRe.exec(elemXml)) !== null) {
       const runXml = rm[0];
 
       const rPrBlock = runXml.match(/<w:rPr\b[\s\S]*?<\/w:rPr>/)?.[0] ?? '';
@@ -274,7 +452,7 @@ function extractParagraphsRaw(
     text = text.replace(/[ \t]*\n[ \t]*/g, '\n').trim();
 
     if (text || imageRIds.length > 0) {
-      paragraphs.push({ text, imageRIds, hasUnderline, underlinedSegments });
+      paragraphs.push({ text, imageRIds, hasUnderline, underlinedSegments, isTable: false });
     }
   }
 
@@ -283,18 +461,53 @@ function extractParagraphsRaw(
 
 function extractParagraphsWithUnderline(
   xmlDoc: Document,
-  _imageRelMap: Map<string, string>
+  _imageRelMap: Map<string, string>,
+  numberingTracker?: NumberingTracker
 ): ParagraphData[] {
-  const paragraphs: ParagraphData[] = [];
-  const pElements = xmlDoc.getElementsByTagName('w:p');
+  const body = xmlDoc.getElementsByTagName('w:body')[0] || xmlDoc.getElementsByTagName('body')[0];
+  if (!body) return [];
 
-  for (let i = 0; i < pElements.length; i++) {
-    const p = pElements[i];
+  const paragraphs: ParagraphData[] = [];
+  const children = Array.from(body.childNodes).filter((n) => n.nodeType === 1) as Element[];
+
+  for (const el of children) {
+    const tagName = el.tagName.toLowerCase();
+    if (tagName === 'w:tbl' || tagName === 'tbl') {
+      const serializer = new XMLSerializer();
+      const tblXml = serializer.serializeToString(el);
+      const { html, imageRIds } = parseWordTable(tblXml, new Map());
+      if (html) {
+        paragraphs.push({
+          text: html,
+          imageRIds,
+          hasUnderline: false,
+          underlinedSegments: [],
+          isTable: true,
+        });
+      }
+      continue;
+    }
+
+    if (tagName !== 'w:p' && tagName !== 'p') continue;
+
     let text = '';
     const imageRIds: string[] = [];
     let hasUnderline = false;
     const underlinedSegments: string[] = [];
-    const runs = p.getElementsByTagName('w:r');
+
+    const numPr = el.getElementsByTagName('w:numPr')[0] || el.getElementsByTagName('numPr')[0];
+    if (numPr && numberingTracker) {
+      const numIdEl = numPr.getElementsByTagName('w:numId')[0] || numPr.getElementsByTagName('numId')[0];
+      const ilvlEl = numPr.getElementsByTagName('w:ilvl')[0] || numPr.getElementsByTagName('ilvl')[0];
+      const numId = numIdEl?.getAttribute('w:val') || numIdEl?.getAttribute('val');
+      const ilvl = ilvlEl?.getAttribute('w:val') || ilvlEl?.getAttribute('val') || '0';
+      if (numId) {
+        const prefix = numberingTracker.nextPrefix(numId, ilvl);
+        if (prefix) text += `${prefix} `;
+      }
+    }
+
+    const runs = el.getElementsByTagName('w:r');
 
     for (let j = 0; j < runs.length; j++) {
       const run = runs[j];
@@ -349,7 +562,7 @@ function extractParagraphsWithUnderline(
     text = text.replace(/[ \t]*\n[ \t]*/g, '\n').trim();
 
     if (text || imageRIds.length > 0) {
-      paragraphs.push({ text, imageRIds, hasUnderline, underlinedSegments });
+      paragraphs.push({ text, imageRIds, hasUnderline, underlinedSegments, isTable: false });
     }
   }
   return paragraphs;
@@ -387,14 +600,17 @@ export const parseWordToExam = async (
   const documentXml = await zip.file('word/document.xml')?.async('string');
   if (!documentXml) throw new Error('Không tìm thấy document.xml trong file Word');
 
+  const numXml = await zip.file('word/numbering.xml')?.async('string');
+  const numberingTracker = numXml ? new NumberingTracker(numXml) : undefined;
+
   let paragraphs: ParagraphData[];
   if (hasMathType) {
-    paragraphs = extractParagraphsRaw(documentXml, oleLatexMap);
+    paragraphs = extractParagraphsRaw(documentXml, oleLatexMap, numberingTracker);
     console.log('📝 Paragraphs (raw/OLE path):', paragraphs.length);
   } else {
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(documentXml, 'application/xml');
-    paragraphs = extractParagraphsWithUnderline(xmlDoc, imageRelMap);
+    paragraphs = extractParagraphsWithUnderline(xmlDoc, imageRelMap, numberingTracker);
     console.log('📝 Paragraphs (DOM path):', paragraphs.length);
   }
 
@@ -458,13 +674,16 @@ async function readWordForEssay(
   const documentXml = await zip.file('word/document.xml')?.async('string');
   if (!documentXml) throw new Error('Không tìm thấy document.xml trong file Word');
 
+  const numXml = await zip.file('word/numbering.xml')?.async('string');
+  const numberingTracker = numXml ? new NumberingTracker(numXml) : undefined;
+
   let paragraphs: ParagraphData[];
   if (oleItems.length > 0) {
-    paragraphs = extractParagraphsRaw(documentXml, oleLatexMap);
+    paragraphs = extractParagraphsRaw(documentXml, oleLatexMap, numberingTracker);
   } else {
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(documentXml, 'application/xml');
-    paragraphs = extractParagraphsWithUnderline(xmlDoc, imageRelMap);
+    paragraphs = extractParagraphsWithUnderline(xmlDoc, imageRelMap, numberingTracker);
   }
   return { paragraphs, images, formulaCount: oleLatexMap.size };
 }
@@ -485,7 +704,18 @@ function appendUniqueImages(target: ImageData[], incoming: ImageData[]) {
 }
 
 function toEssayHtml(lines: string[]): string {
-  const normalized = lines.map((line) => normalizeLatex(line)).filter(Boolean);
+  const normalized = lines
+    .map((line) => {
+      const trimmed = line.trim();
+      if (
+        trimmed.startsWith('<div class="doc-table-wrap">') ||
+        trimmed.startsWith('<div class="doc-image-wrap">')
+      ) {
+        return trimmed;
+      }
+      return normalizeLatex(trimmed);
+    })
+    .filter(Boolean);
   return escapeHtmlPreserveLaTeX(normalized.join('\n')).replace(/\n/g, '<br>');
 }
 
@@ -499,7 +729,7 @@ function startMatch(text: string): { number: number; rest: string } | null {
 
 function parseEssayBlocks(paragraphs: ParagraphData[], images: ImageData[]): EssayWordBlock[] {
   const blocks: EssayWordBlock[] = [];
-  const hasExplicitQuestions = paragraphs.some((paragraph) => Boolean(startMatch(paragraph.text.trim())));
+  const hasExplicitQuestions = paragraphs.some((paragraph) => !paragraph.isTable && Boolean(startMatch(paragraph.text.trim())));
   let current: EssayWordBlock | null = null;
 
   const ensureFallback = () => {
@@ -524,9 +754,14 @@ function parseEssayBlocks(paragraphs: ParagraphData[], images: ImageData[]): Ess
     current = null;
   };
 
+  const imageMap = new Map<string, ImageData>();
+  images.forEach((img) => {
+    if (img.rId) imageMap.set(img.rId, img);
+  });
+
   paragraphs.forEach((paragraph) => {
     const text = paragraph.text.trim();
-    const match = text ? startMatch(text) : null;
+    const match = (!paragraph.isTable && text) ? startMatch(text) : null;
     if (match) {
       flush();
       current = {
@@ -546,7 +781,7 @@ function parseEssayBlocks(paragraphs: ParagraphData[], images: ImageData[]): Ess
     if (!current && text && ESSAY_HEADING_RE.test(text)) return;
 
     const block = ensureFallback();
-    const solutionMarker = text.match(ESSAY_SOLUTION_RE);
+    const solutionMarker = (!paragraph.isTable && text) ? text.match(ESSAY_SOLUTION_RE) : null;
     if (solutionMarker) {
       block.inSolution = true;
       if (solutionMarker[1]?.trim()) block.afterSolution.push(solutionMarker[1].trim());
@@ -554,9 +789,24 @@ function parseEssayBlocks(paragraphs: ParagraphData[], images: ImageData[]): Ess
       return;
     }
 
-    if (text && !ESSAY_HEADING_RE.test(text)) {
-      if (block.inSolution) block.afterSolution.push(text);
-      else block.beforeSolution.push(text);
+    let inlineContent = text;
+    if (paragraph.imageRIds && paragraph.imageRIds.length > 0) {
+      for (const rId of paragraph.imageRIds) {
+        const img = imageMap.get(rId);
+        if (img && img.base64) {
+          const imgTag = `<div class="doc-image-wrap"><img src="data:${img.contentType || 'image/png'};base64,${img.base64}" alt="${img.filename || 'Hình ảnh'}" class="doc-inline-img" /></div>`;
+          if (inlineContent) inlineContent += '\n' + imgTag;
+          else inlineContent = imgTag;
+          if (!block.questionImages.some((i) => i.id === img.id)) {
+            block.questionImages.push(img);
+          }
+        }
+      }
+    }
+
+    if (inlineContent && !ESSAY_HEADING_RE.test(inlineContent)) {
+      if (block.inSolution) block.afterSolution.push(inlineContent);
+      else block.beforeSolution.push(inlineContent);
     }
     appendUniqueImages(
       block.inSolution ? block.solutionImages : block.questionImages,
@@ -697,13 +947,16 @@ async function extractImages(
           png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
           gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml',
         };
+        const contentType = types[ext];
+        if (!contentType) continue; // Bỏ qua .wmf, .emf (ảnh preview OLE công thức không xem được trên web)
+
         let rId = '';
         for (const [rid, fname] of imageRelMap.entries()) {
           if (fname === filename) { rId = rid; break; }
         }
         images.push({
           id: `img_${images.length}`, filename, base64: data,
-          contentType: types[ext] || 'image/png', rId,
+          contentType, rId,
         });
       }
     }

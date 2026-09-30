@@ -8,7 +8,7 @@
 - Học sinh đăng nhập bằng Gmail đã gắn với hồ sơ, hoặc tài khoản dự phòng.
 - Học sinh nhập lời giải hoặc tải ảnh bài viết tay lên Google Drive.
 - Gemini tạo gợi ý chấm; giáo viên xác nhận điểm cuối.
-- Kết quả công khai bằng token, Showdown + DOMPurify + MathJax và gửi Zalo.
+- Kết quả công khai bằng token bảo mật, Showdown + DOMPurify + MathJax.
 
 ## Cài đặt
 

@@ -9,7 +9,7 @@
 - Word Equation/OMML được đọc trực tiếp, không gọi Gemini.
 - Gemini chỉ được gọi khi giáo viên bấm chấm gợi ý cho bài học sinh.
 - Giáo viên phải xác nhận từng câu trước khi lưu điểm cuối và công bố link.
-- Trang kết quả công khai hỗ trợ Markdown, MathJax, ảnh bài làm và gửi Zalo.
+- Trang kết quả công khai hỗ trợ Markdown, MathJax và ảnh bài làm.
 
 ## 2. Firebase Web hardcode
 
@@ -135,7 +135,7 @@ Thêm domain Vercel vào Authorized domains. Trong hồ sơ học sinh, nhập �
 6. Học sinh nhập lời giải hoặc tải ảnh bài viết tay.
 7. Giáo viên bấm AI chấm gợi ý.
 8. Giáo viên xác nhận từng câu và lưu điểm cuối.
-9. Tạo link phụ huynh và gửi Zalo.
+9. Tạo link phụ huynh và sao chép gửi kết quả.
 
 ## 9. Kiểm thử bắt buộc
 

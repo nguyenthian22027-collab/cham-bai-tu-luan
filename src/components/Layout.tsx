@@ -4,7 +4,6 @@ import {
   BookOpenCheck,
   GraduationCap,
   KeyRound,
-  Link2,
   LogOut,
   Menu,
   School,
@@ -28,7 +27,6 @@ const NAV: Record<Role, NavLink[]> = {
     { icon: <School {...iconProps} />, label: 'Lớp học', path: '/classes' },
     { icon: <Users {...iconProps} />, label: 'Học sinh', path: '/students' },
     { icon: <KeyRound {...iconProps} />, label: 'Tài khoản học sinh', path: '/student-accounts' },
-    { icon: <Link2 {...iconProps} />, label: 'Kết nối Zalo', path: '/zalo-connection' },
     { icon: <UserCog {...iconProps} />, label: 'Người dùng', path: '/users' },
   ],
   [Role.TEACHER]: [
@@ -58,7 +56,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       <aside className={`sidebar ${open ? 'open' : ''}`}>
         <div className="sidebar-logo">
           <h2><GraduationCap size={22} /> Chấm bài tự luận</h2>
-          <p>AI gợi ý · Giáo viên xác nhận · Gửi Zalo</p>
+          <p>AI gợi ý · Giáo viên xác nhận · Công bố kết quả</p>
         </div>
         <nav className="sidebar-nav">
           <div className="nav-section">Chức năng</div>

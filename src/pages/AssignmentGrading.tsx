@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Ban, CheckCircle, Copy, ExternalLink, Link2, MessageCircle, Wand2 } from 'lucide-react';
+import { Ban, CheckCircle, Copy, ExternalLink, Link2, Wand2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import MathText from '../components/MathText';
@@ -10,7 +10,6 @@ import EssayImageAnnotator from '../components/EssayImageAnnotator';
 import SolutionScoreTable from '../components/SolutionScoreTable';
 import { parseEssayAnswer } from '../services/essayGradingService';
 import { getPublishedEssayLink, publishEssayResult, revokeEssayResult } from '../services/publicResultService';
-import { isUsableZaloPhone, sendZaloMessage } from '../services/zaloService';
 import {
   finalizeSubmissionGrade,
   getAssignmentTargets,
@@ -91,7 +90,6 @@ export default function AssignmentGrading() {
   const [finalFeedback, setFinalFeedback] = useState('');
   const [publication, setPublication] = useState<PublishedEssayLink | null>(null);
   const [publishing, setPublishing] = useState(false);
-  const [sendingZalo, setSendingZalo] = useState(false);
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [assignmentId]);
   useEffect(() => { if (selected) loadSubmission(selected); /* eslint-disable-next-line */ }, [selected?.id]);
@@ -271,38 +269,6 @@ export default function AssignmentGrading() {
     toast('Đã sao chép đường link kết quả.');
   }
 
-  async function sendResultToZalo() {
-    if (!submission || !assignment || !publication?.active) return;
-    if (!isUsableZaloPhone(publication.parentPhone || '')) {
-      toast('Học sinh chưa có số Zalo phụ huynh hợp lệ.', 'warning');
-      return;
-    }
-    setSendingZalo(true);
-    try {
-      await sendZaloMessage({
-        id: submission.studentId,
-        name: publication.parentName || 'Phụ huynh',
-        phone: publication.parentPhone || '',
-        message: [
-          `Kính gửi ${publication.parentName || 'phụ huynh'},`,
-          `Kết quả chấm bài tự luận của em ${submission.studentName}: ${assignment.title}.`,
-          `Điểm: ${finalScore || submission.finalScore || 0}/${submission.maxScore}.`,
-          finalFeedback ? `Nhận xét: ${finalFeedback}` : '',
-          `Xem bài làm và nhận xét chi tiết tại: ${publication.url}`,
-        ].filter(Boolean).join('\n'),
-      }, {
-        kind: 'ESSAY_RESULT',
-        classId: assignment.classId,
-        periodKey: submission.id,
-      });
-      toast('Đã đưa tin nhắn kết quả vào hàng đợi Zalo.');
-    } catch (error) {
-      toast(error instanceof Error ? error.message : 'Không gửi được Zalo.', 'error');
-    } finally {
-      setSendingZalo(false);
-    }
-  }
-
   if (loading) return <div className="loading-state"><div className="spinner" /><span>Đang tải...</span></div>;
   if (!assignment || !exam) return <div className="empty-state"><h3>Không tìm thấy bài</h3></div>;
 
@@ -430,13 +396,9 @@ export default function AssignmentGrading() {
                       <button className="btn btn-primary" disabled={publishing || submission.status !== 'graded'} onClick={publishResult}>
                         <Link2 size={16} /> {publishing ? 'Đang xử lý...' : publication?.active ? 'Cập nhật trang kết quả' : 'Tạo link kết quả'}
                       </button>
-                      <button className="btn btn-secondary" disabled={!publication?.active || sendingZalo} onClick={sendResultToZalo}>
-                        <MessageCircle size={16} /> {sendingZalo ? 'Đang gửi...' : 'Gửi Zalo phụ huynh'}
-                      </button>
                       {publication?.active && <button className="btn btn-ghost" disabled={publishing} onClick={revokeResult}><Ban size={16} /> Thu hồi link</button>}
                     </div>
                     {submission.status !== 'graded' && <p className="result-publish-warning">Hãy lưu điểm cuối trước khi tạo link.</p>}
-                    {publication?.active && !isUsableZaloPhone(publication.parentPhone || '') && <p className="result-publish-warning">Chưa có số điện thoại phụ huynh hợp lệ; vẫn có thể sao chép link để gửi thủ công.</p>}
                   </div>
                 </div>
               </div>
@@ -519,9 +481,11 @@ function QuestionGradeBlock({ q, displayNum, answer, result, grade, onSave }: {
       </div>
 
       <MathText html={q.text} block />
-      {imageUrls.length > 0 && (
+      {imageUrls.filter((url) => !q.text?.includes(url.slice(0, 30))).length > 0 && (
         <div className="exam-question-images">
-          {imageUrls.map((url, i) => <img key={i} src={url} alt={`Hình ${i + 1}`} />)}
+          {imageUrls
+            .filter((url) => !q.text?.includes(url.slice(0, 30)))
+            .map((url, i) => <img key={i} src={url} alt={`Hình ${i + 1}`} />)}
         </div>
       )}
 

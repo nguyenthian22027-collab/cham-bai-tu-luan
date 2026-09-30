@@ -44,7 +44,7 @@ function AnnotatedImage({ token, question, imageIndex }: { token: string; questi
           </span>
         ))}
       </div>
-      <figcaption>Trang {imageIndex + 1} · Ảnh được tải qua máy chủ để mở ổn định trên Zalo</figcaption>
+      <figcaption>Trang {imageIndex + 1}</figcaption>
       <a className="public-answer-image-open" href={proxyUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /> Mở ảnh gốc</a>
     </figure>
   );

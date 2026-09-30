@@ -3977,3 +3977,60 @@ math-field:not(:defined) {
   .image-lightbox-fit { display: none; }
   .essay-annotator-caption { align-items: flex-start; }
 }
+
+/* ============================================================
+   BẢNG BIỂU & HÌNH ẢNH TRÍCH XUẤT TỪ FILE WORD (.docx)
+   ============================================================ */
+.doc-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  margin: 12px 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.doc-table {
+  width: auto;
+  min-width: 60%;
+  max-width: 100%;
+  margin: 8px auto;
+  border-collapse: collapse;
+  border: 1.5px solid #334155;
+  background-color: #ffffff;
+  font-size: 0.95rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.doc-table th,
+.doc-table td {
+  border: 1px solid #475569;
+  padding: 8px 14px;
+  text-align: center;
+  vertical-align: middle;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.doc-table tr:first-child td,
+.doc-table thead th {
+  background-color: #f1f5f9;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.doc-table tr:hover td {
+  background-color: #f8fafc;
+}
+
+.doc-image-wrap {
+  text-align: center;
+  margin: 12px 0;
+}
+
+.doc-inline-img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  display: inline-block;
+}
