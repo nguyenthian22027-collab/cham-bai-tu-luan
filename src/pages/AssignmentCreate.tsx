@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckSquare, FileCheck2, FileUp, Send, Settings, Users } from 'lucide-react';
+import { AlertTriangle, BookOpen, CheckSquare, ChevronDown, ChevronUp, Download, Eye, FileCheck2, FileUp, Send, Settings, Users } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import ExamReviewModal from '../components/ExamReviewModal';
 import Modal from '../components/Modal';
 import PointsConfigEditor from '../components/PointsConfigEditor';
+import WordFileGuideModal from '../components/WordFileGuideModal';
 import { createAssignmentExam, createAssignmentsForClasses } from '../services/assignmentService';
 import { getClasses, getClassRoster } from '../services/dataService';
 import {
@@ -16,6 +17,7 @@ import {
   validateExamData,
 } from '../services/mathWordParserService';
 import { createDefaultPointsConfig } from '../services/scoringService';
+import { downloadAnswerTemplate, downloadQuestionTemplate } from '../services/wordTemplateService';
 import { ClassItem, ExamData, ExamPointsConfig, Student } from '../types';
 
 function fromInputDateTime(value: string): Date | null {
@@ -65,6 +67,9 @@ export default function AssignmentCreate() {
   const [parsingQuestion, setParsingQuestion] = useState(false);
   const [parsingAnswer, setParsingAnswer] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(true);
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -124,6 +129,22 @@ export default function AssignmentCreate() {
       hasReusableSolution(solutionImport.items[localQuestionNumber(question.number, index)]?.solution),
     ).length;
   }, [examData, solutionImport]);
+
+  const answerCount = solutionImport ? Object.keys(solutionImport.items).length : 0;
+  const questionCount = examData ? examData.questions.length : 0;
+  const countMismatch = examData && solutionImport && answerCount !== questionCount;
+
+  async function handleDownloadTemplate(type: 'question' | 'answer') {
+    setDownloadingTemplate(true);
+    try {
+      if (type === 'question') await downloadQuestionTemplate(4);
+      else await downloadAnswerTemplate(4);
+    } catch {
+      toast('Không tạo được file mẫu', 'error');
+    } finally {
+      setDownloadingTemplate(false);
+    }
+  }
 
   async function handleQuestionFile(file?: File) {
     if (!file) return;
@@ -297,7 +318,31 @@ export default function AssignmentCreate() {
           <h1 className="page-title"><FileUp size={26} /> <span>Tạo bài tự luận từ 2 file Word</span></h1>
           <p className="page-sub">File đề và file đáp án được phân tích một lần; Gemini chỉ dùng khi giáo viên bấm chấm bài.</p>
         </div>
-        <button className="btn btn-ghost" onClick={() => navigate('/assignments')}>Quay lại</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="upload-guide-btn" onClick={() => setGuideOpen(true)}>
+            <BookOpen size={14} /> Hướng dẫn soạn file
+          </button>
+          <button className="btn btn-ghost" onClick={() => navigate('/assignments')}>Quay lại</button>
+        </div>
+      </div>
+
+      {/* Template download bar */}
+      <div className="template-download-bar" style={{ marginBottom: 16 }}>
+        <span>📥 Chưa có file? Tải file Word mẫu đúng cấu trúc để điền nội dung vào:</span>
+        <button
+          className="btn btn-secondary"
+          onClick={() => handleDownloadTemplate('question')}
+          disabled={downloadingTemplate}
+        >
+          <Download size={14} /> Mẫu file đề
+        </button>
+        <button
+          className="btn btn-secondary"
+          onClick={() => handleDownloadTemplate('answer')}
+          disabled={downloadingTemplate}
+        >
+          <Download size={14} /> Mẫu file đáp án
+        </button>
       </div>
 
       <div className="assignment-create-grid">
@@ -337,9 +382,56 @@ export default function AssignmentCreate() {
                 <div><span>Đã ghép</span><br /><strong>{matchedSolutions}/{examData?.questions.length || 0} câu</strong></div>
               </div>
             )}
+            {countMismatch && (
+              <div className="upload-mismatch-banner">
+                <AlertTriangle size={16} />
+                <span>
+                  <strong>Số câu không khớp:</strong> File đề có <strong>{questionCount} câu</strong>, file đáp án có <strong>{answerCount} mục</strong>.
+                  Hệ thống ghép theo số thứ tự — câu dư sẽ không có lời giải.
+                  Vui lòng kiểm tra lại 2 file.
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Feature 3: Quick question preview */}
+      {examData && examData.questions.length > 0 && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <div className="question-preview-header" style={{ padding: '10px 16px 0' }}>
+            <span><Eye size={15} /> Xem nhanh {examData.questions.length} câu đã đọc</span>
+            <button className="question-preview-toggle" onClick={() => setPreviewOpen((v) => !v)}>
+              {previewOpen ? <><ChevronUp size={12} /> Thu gọn</> : <><ChevronDown size={12} /> Mở rộng</>}
+            </button>
+          </div>
+          {previewOpen && (
+            <div className="question-preview-list" style={{ padding: '8px 16px 14px' }}>
+              {examData.questions.map((q, idx) => {
+                const localNum = localQuestionNumber(q.number, idx);
+                const hasSol = solutionImport
+                  ? hasReusableSolution(solutionImport.items[localNum]?.solution)
+                  : hasReusableSolution(q.solution);
+                const rawText = (q.text || '').replace(/<[^>]+>/g, '').trim();
+                return (
+                  <div
+                    key={q.number}
+                    className={`question-preview-item ${hasSol ? 'has-solution' : 'no-solution'}`}
+                  >
+                    <span className="question-preview-num">Câu {localNum}</span>
+                    <span className="question-preview-text" title={rawText}>
+                      {rawText || '(Câu chỉ có hình / công thức)'}
+                    </span>
+                    <span className={`question-preview-badge ${hasSol ? 'ok' : 'missing'}`}>
+                      {hasSol ? '✓ Có đáp án' : '— Chưa có'}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {examData && (
         <div className="card" style={{ marginTop: 16 }}>
@@ -522,6 +614,8 @@ export default function AssignmentCreate() {
           </div>
         </div>
       </Modal>
+
+      <WordFileGuideModal open={guideOpen} onClose={() => setGuideOpen(false)} />
     </div>
   );
 }
