@@ -277,6 +277,169 @@ class NumberingTracker {
 }
 
 // ============================================================
+// OMML (WORD OFFICE MATH) TO LATEX CONVERTER
+// ============================================================
+function ommlToLatex(mathXml: string): string {
+  if (!mathXml) return '';
+  const xml = mathXml
+    .replace(/<w:rPr\b[\s\S]*?<\/w:rPr>/g, '')
+    .replace(/<m:ctrlPr\b[\s\S]*?<\/m:ctrlPr>/g, '')
+    .replace(/<m:fPr\b[\s\S]*?<\/m:fPr>/g, '');
+
+  function convertNode(s: string): string {
+    if (!s) return '';
+    let out = '';
+    const tagRe = /<m:([a-zA-Z]+)\b([^>]*)>([\s\S]*?)<\/m:\1>/g;
+    let m: RegExpExecArray | null;
+
+    while ((m = tagRe.exec(s)) !== null) {
+      const tag = m[1];
+      const inner = m[3];
+      if (tag === 'f') {
+        const numM = inner.match(/<m:num\b[^>]*>([\s\S]*?)<\/m:num>/);
+        const denM = inner.match(/<m:den\b[^>]*>([\s\S]*?)<\/m:den>/);
+        const num = numM ? convertNode(numM[1]) : '';
+        const den = denM ? convertNode(denM[1]) : '';
+        out += `\\frac{${num.trim()}}{${den.trim()}}`;
+      } else if (tag === 'sSup') {
+        const baseM = inner.match(/<m:e\b[^>]*>([\s\S]*?)<\/m:e>/);
+        const supM = inner.match(/<m:sup\b[^>]*>([\s\S]*?)<\/m:sup>/);
+        out += `{${convertNode(baseM ? baseM[1] : '')}}^{${convertNode(supM ? supM[1] : '')}}`;
+      } else if (tag === 'sSub') {
+        const baseM = inner.match(/<m:e\b[^>]*>([\s\S]*?)<\/m:e>/);
+        const subM = inner.match(/<m:sub\b[^>]*>([\s\S]*?)<\/m:sub>/);
+        out += `{${convertNode(baseM ? baseM[1] : '')}}_{${convertNode(subM ? subM[1] : '')}}`;
+      } else if (tag === 'sSubSup') {
+        const baseM = inner.match(/<m:e\b[^>]*>([\s\S]*?)<\/m:e>/);
+        const subM = inner.match(/<m:sub\b[^>]*>([\s\S]*?)<\/m:sub>/);
+        const supM = inner.match(/<m:sup\b[^>]*>([\s\S]*?)<\/m:sup>/);
+        out += `{${convertNode(baseM ? baseM[1] : '')}}_{${convertNode(subM ? subM[1] : '')}}^{${convertNode(supM ? supM[1] : '')}}`;
+      } else if (tag === 'rad') {
+        const degM = inner.match(/<m:deg\b[^>]*>([\s\S]*?)<\/m:deg>/);
+        const baseM = inner.match(/<m:e\b[^>]*>([\s\S]*?)<\/m:e>/);
+        const deg = degM ? convertNode(degM[1]).trim() : '';
+        const base = baseM ? convertNode(baseM[1]) : '';
+        out += deg ? `\\sqrt[${deg}]{${base}}` : `\\sqrt{${base}}`;
+      } else if (tag === 'd') {
+        const begM = inner.match(/<m:begChr\b[^>]*m:val="([^"]*)"/);
+        const endM = inner.match(/<m:endChr\b[^>]*m:val="([^"]*)"/);
+        const beg = begM ? begM[1] : '(';
+        const end = endM ? endM[1] : ')';
+        const eM = inner.match(/<m:e\b[^>]*>([\s\S]*?)<\/m:e>/);
+        const content = convertNode(eM ? eM[1] : inner);
+        if (beg === '(' && end === ')') {
+          out += `\\left( ${content} \\right)`;
+        } else if (beg === '[' && end === ']') {
+          out += `\\left[ ${content} \\right]`;
+        } else if (beg === '{' && end === '}') {
+          out += `\\left\\{ ${content} \\right\\}`;
+        } else if (beg === '|' && end === '|') {
+          out += `\\left| ${content} \\right|`;
+        } else {
+          out += `${beg}${content}${end}`;
+        }
+      } else if (tag === 'bar') {
+        const eM = inner.match(/<m:e\b[^>]*>([\s\S]*?)<\/m:e>/);
+        out += `\\overline{${convertNode(eM ? eM[1] : inner)}}`;
+      } else if (tag === 'r') {
+        const tM = inner.match(/<m:t\b[^>]*>([\s\S]*?)<\/m:t>/);
+        if (tM) {
+          let text = decodeXmlEntities(tM[1]);
+          text = text.replace(/·/g, ' \\cdot ');
+          text = text.replace(/(?<=\d)\.(?=[a-zA-Z\d])/g, ' \\cdot ');
+          text = text.replace(/^\.(?=[a-zA-Z\d])/g, ' \\cdot ');
+          text = text.replace(/([a-zA-Z\d])\.(?=[a-zA-Z\d])/g, '$1 \\cdot ');
+          out += text;
+        }
+      } else if (tag === 't') {
+        let text = decodeXmlEntities(inner);
+        text = text.replace(/·/g, ' \\cdot ');
+        out += text;
+      } else {
+        out += convertNode(inner);
+      }
+    }
+    return out;
+  }
+
+  return convertNode(xml).trim();
+}
+
+// ============================================================
+// FORMAT SUB-ITEMS INTO RESPONSIVE GRID (a, b, c, d)
+// ============================================================
+export function formatSubItemsLine(line: string): string {
+  if (!line || typeof line !== 'string') return line;
+  if (
+    line.startsWith('<div class="doc-table-wrap">') ||
+    line.startsWith('<div class="doc-image-wrap">') ||
+    line.includes('<div class="math-sub-grid">')
+  ) {
+    return line;
+  }
+
+  // 1. Chuyển nhãn ý con bên trong $...$ ra ngoài (ví dụ: $a)\frac{1}{2}$ -> a) $\frac{1}{2}$)
+  let normalized = line.replace(/\$([a-dA-D][\.\)])\s*([\s\S]*?)\$/g, (_m, label, inner) => {
+    return `${label} $${inner}$`;
+  });
+
+  // 2. Tìm tất cả các marker: a), b), c), d) hoặc a., b., c., d.
+  const itemRe = /(?:^|[\s\t$])([a-dA-D][\.\)])(?:\s+|(?:(?=[$])))/g;
+  const matches: Array<{ label: string; markerIndex: number; contentStart: number }> = [];
+  let match: RegExpExecArray | null;
+  while ((match = itemRe.exec(normalized)) !== null) {
+    const rawMatch = match[0];
+    const label = match[1];
+    const markerIndex = match.index + rawMatch.indexOf(label);
+    matches.push({
+      label,
+      markerIndex,
+      contentStart: markerIndex + label.length,
+    });
+  }
+
+  // Cần ít nhất 2 ý con trên cùng dòng để tạo lưới
+  if (matches.length < 2) {
+    return line;
+  }
+
+  // Kiểm tra thứ tự tuần tự hợp lý (a->b->c...)
+  const letters = matches.map((m) => m.label[0].toLowerCase());
+  const hasValidProgression = letters.every((char, idx) => {
+    if (idx === 0) return true;
+    return char.charCodeAt(0) === letters[idx - 1].charCodeAt(0) + 1;
+  });
+
+  if (!hasValidProgression && letters[0] !== 'a') {
+    return line;
+  }
+
+  const firstMarker = matches[0];
+  const prefix = normalized.substring(0, firstMarker.markerIndex).trim();
+
+  const items: Array<{ label: string; content: string }> = [];
+  for (let i = 0; i < matches.length; i++) {
+    const current = matches[i];
+    const nextStart = i + 1 < matches.length ? matches[i + 1].markerIndex : normalized.length;
+    let itemContent = normalized.substring(current.contentStart, nextStart).trim();
+    itemContent = itemContent.replace(/[\t\s]+$/, '');
+
+    items.push({
+      label: current.label,
+      content: itemContent,
+    });
+  }
+
+  let gridHtml = '<div class="math-sub-grid">';
+  for (const it of items) {
+    gridHtml += `<div class="math-sub-item"><span class="math-sub-label">${it.label}</span><span class="math-sub-content">${it.content}</span></div>`;
+  }
+  gridHtml += '</div>';
+
+  return prefix ? `${prefix}\n${gridHtml}` : gridHtml;
+}
+
+// ============================================================
 // TABLE PARSER (w:tbl -> HTML)
 // ============================================================
 function parseWordTable(
@@ -285,7 +448,7 @@ function parseWordTable(
 ): { html: string; imageRIds: string[] } {
   const trRe = /<w:tr\b[\s\S]*?<\/w:tr>/g;
   const tcRe = /<w:tc\b[\s\S]*?<\/w:tc>/g;
-  const runRe = /<w:r\b[\s\S]*?<\/w:r>/g;
+  const childRe = /<(w:r|m:oMath|m:oMathPara)\b[\s\S]*?<\/\1>/g;
   const imageRIds: string[] = [];
 
   const rows: Array<Array<{ text: string; colSpan: number }>> = [];
@@ -301,9 +464,18 @@ function parseWordTable(
 
       let cellText = '';
       let rm: RegExpExecArray | null;
-      runRe.lastIndex = 0;
-      while ((rm = runRe.exec(tcXml)) !== null) {
-        const runXml = rm[0];
+      childRe.lastIndex = 0;
+      while ((rm = childRe.exec(tcXml)) !== null) {
+        const cTag = rm[1];
+        const chunkXml = rm[0];
+
+        if (cTag === 'm:oMath' || cTag === 'm:oMathPara') {
+          const formula = ommlToLatex(chunkXml);
+          if (formula) cellText += ` $${formula}$ `;
+          continue;
+        }
+
+        const runXml = chunkXml;
         const wtRe = /<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g;
         let wm: RegExpExecArray | null;
         while ((wm = wtRe.exec(runXml)) !== null) cellText += decodeXmlEntities(wm[1]);
@@ -359,7 +531,7 @@ function extractParagraphsRaw(
   const xmlToParse = bodyMatch ? bodyMatch[1] : documentXml;
 
   const topElemRe = /<(w:p|w:tbl)\b[\s\S]*?<\/\1>/g;
-  const runRe  = /<w:r\b[\s\S]*?<\/w:r>/g;
+  const childRe  = /<(w:r|m:oMath|m:oMathPara)\b[\s\S]*?<\/\1>/g;
   const paragraphs: ParagraphData[] = [];
 
   let em: RegExpExecArray | null;
@@ -397,10 +569,20 @@ function extractParagraphsRaw(
     }
 
     let rm: RegExpExecArray | null;
-    runRe.lastIndex = 0;
-    while ((rm = runRe.exec(elemXml)) !== null) {
-      const runXml = rm[0];
+    childRe.lastIndex = 0;
+    while ((rm = childRe.exec(elemXml)) !== null) {
+      const cTag = rm[1];
+      const chunkXml = rm[0];
 
+      if (cTag === 'm:oMath' || cTag === 'm:oMathPara') {
+        const formulaLatex = ommlToLatex(chunkXml);
+        if (formulaLatex) {
+          text += ` $${formulaLatex}$ `;
+        }
+        continue;
+      }
+
+      const runXml = chunkXml;
       const rPrBlock = runXml.match(/<w:rPr\b[\s\S]*?<\/w:rPr>/)?.[0] ?? '';
       const isUnderlined = /<w:u\b/.test(rPrBlock);
 
@@ -507,10 +689,22 @@ function extractParagraphsWithUnderline(
       }
     }
 
-    const runs = el.getElementsByTagName('w:r');
+    const serializer = new XMLSerializer();
+    const paraChildren = Array.from(el.childNodes).filter((n) => n.nodeType === 1) as Element[];
 
-    for (let j = 0; j < runs.length; j++) {
-      const run = runs[j];
+    for (let j = 0; j < paraChildren.length; j++) {
+      const child = paraChildren[j];
+      const cTag = child.tagName.toLowerCase();
+
+      if (cTag === 'm:omath' || cTag === 'omath' || cTag === 'm:omathpara' || cTag === 'omathpara') {
+        const mathXml = serializer.serializeToString(child);
+        const formulaLatex = ommlToLatex(mathXml);
+        if (formulaLatex) text += ` $${formulaLatex}$ `;
+        continue;
+      }
+
+      if (cTag !== 'w:r' && cTag !== 'r') continue;
+      const run = child;
 
       const blips = run.getElementsByTagName('a:blip');
       for (let k = 0; k < blips.length; k++) {
@@ -709,11 +903,12 @@ function toEssayHtml(lines: string[]): string {
       const trimmed = line.trim();
       if (
         trimmed.startsWith('<div class="doc-table-wrap">') ||
-        trimmed.startsWith('<div class="doc-image-wrap">')
+        trimmed.startsWith('<div class="doc-image-wrap">') ||
+        trimmed.startsWith('<div class="math-sub-grid">')
       ) {
         return trimmed;
       }
-      return normalizeLatex(trimmed);
+      return formatSubItemsLine(normalizeLatex(trimmed));
     })
     .filter(Boolean);
   return escapeHtmlPreserveLaTeX(normalized.join('\n')).replace(/\n/g, '<br>');
@@ -1525,13 +1720,13 @@ function attachImages(q: ParsedQuestion, rIds: string[], images: ImageData[]): v
 function toQuestion(pq: ParsedQuestion, globalIndex: number): Question {
   return {
     number: pq.part * 100 + pq.number,
-    text: escapeHtmlPreserveLaTeX(pq.text),
+    text: escapeHtmlPreserveLaTeX(formatSubItemsLine(pq.text)),
     type: pq.type,
     options: pq.options.map((o) => ({ ...o, text: escapeHtmlPreserveLaTeX(o.text) })),
     correctAnswer: pq.correctAnswer,
     part: `PHẦN ${pq.part}`,
     images: pq.images,
-    solution: pq.solution,
+    solution: pq.solution ? escapeHtmlPreserveLaTeX(formatSubItemsLine(pq.solution)) : '',
     section: { letter: String(pq.part), name: getPartName(pq.part), points: '' },
   };
 }

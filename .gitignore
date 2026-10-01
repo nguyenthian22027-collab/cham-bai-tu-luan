@@ -32,3 +32,6 @@ dist-ssr
 
 # Vercel
 .vercel
+
+# Temporary scratch
+scratch/
